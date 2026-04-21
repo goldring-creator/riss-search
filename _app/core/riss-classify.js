@@ -1,11 +1,9 @@
 const fs = require('fs');
 const path = require('path');
-const Anthropic = require('@anthropic-ai/sdk');
+const { spawnSync } = require('child_process');
 
-const client = new Anthropic();
-
-async function classifyPaper(paper, keyword) {
-  const prompt = `다음 논문을 분석하여 주요 주제 태그를 추출하세요.
+function buildPrompt(paper, keyword) {
+  return `다음 논문을 분석하여 주요 주제 태그를 추출하세요.
 
 검색 키워드: "${keyword}"
 제목: ${paper.title}
@@ -18,23 +16,59 @@ async function classifyPaper(paper, keyword) {
 
 JSON 형식으로만 응답하세요:
 {"tags": ["태그1", "태그2", "태그3"], "primaryTag": "가장 핵심 태그 1개", "summary": "한 줄 요약 (30자 이내)"}`;
+}
 
+function parseJson(text) {
+  const m = text.match(/\{[\s\S]+\}/);
+  if (!m) throw new Error('JSON 파싱 실패: ' + text.substring(0, 100));
+  return JSON.parse(m[0]);
+}
+
+async function classifyWithApi(paper, keyword) {
+  const Anthropic = require('@anthropic-ai/sdk');
+  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 200,
-    messages: [{ role: 'user', content: prompt }]
+    messages: [{ role: 'user', content: buildPrompt(paper, keyword) }]
   });
+  return parseJson(response.content[0].text.trim());
+}
 
-  const text = response.content[0].text.trim();
-  const jsonMatch = text.match(/\{[\s\S]+\}/);
-  if (!jsonMatch) throw new Error('JSON 파싱 실패: ' + text);
-  return JSON.parse(jsonMatch[0]);
+function classifyWithCli(paper, keyword) {
+  const claudePath = process.env.CLAUDE_CLI_PATH || 'claude';
+  const prompt = buildPrompt(paper, keyword);
+  const result = spawnSync(claudePath, ['-p', prompt], {
+    encoding: 'utf8',
+    timeout: 60000,
+    env: {
+      ...process.env,
+      PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH || ''}`,
+    },
+  });
+  if (result.error) throw new Error(`claude CLI 실행 실패: ${result.error.message}`);
+  if (result.status !== 0) throw new Error(`claude CLI 오류: ${result.stderr}`);
+  return parseJson(result.stdout);
+}
+
+async function classifyPaper(paper, keyword) {
+  if (process.env.USE_CLAUDE_CLI === '1') {
+    return classifyWithCli(paper, keyword);
+  }
+  return classifyWithApi(paper, keyword);
 }
 
 async function runClassify(metadataPath, pdfsDir, outputDir, keyword) {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error('ANTHROPIC_API_KEY 환경변수가 없습니다.');
+  const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
+  const hasClaudeCli = process.env.USE_CLAUDE_CLI === '1';
+
+  if (!hasApiKey && !hasClaudeCli) {
+    console.error('분류 불가: ANTHROPIC_API_KEY 또는 Claude CLI가 필요합니다.');
     process.exit(1);
+  }
+
+  if (hasClaudeCli && !hasApiKey) {
+    console.log('로컬 Claude CLI로 분류합니다.');
   }
 
   const papers = JSON.parse(fs.readFileSync(metadataPath, 'utf8'));
@@ -55,7 +89,6 @@ async function runClassify(metadataPath, pdfsDir, outputDir, keyword) {
       paper.summary = classification.summary;
       paper.classified = true;
 
-      // 폴더 이동
       if (paper.filePath) {
         const srcPath = path.join(outputDir, paper.filePath);
         if (fs.existsSync(srcPath)) {
@@ -79,14 +112,12 @@ async function runClassify(metadataPath, pdfsDir, outputDir, keyword) {
       results.push(paper);
     }
 
-    // API rate limit 방지
-    await new Promise(r => setTimeout(r, 300));
+    // API/CLI rate limit 방지
+    if (hasApiKey) await new Promise(r => setTimeout(r, 300));
   }
 
-  // metadata.json 업데이트
   fs.writeFileSync(metadataPath, JSON.stringify(results, null, 2), 'utf8');
 
-  // report.csv 생성
   const csvPath = path.join(outputDir, 'report.csv');
   const csvLines = [
     '제목,저자,연도,주제태그,핵심태그,요약,파일경로,다운로드상태',
@@ -101,10 +132,9 @@ async function runClassify(metadataPath, pdfsDir, outputDir, keyword) {
       p.downloadStatus || 'unknown'
     ].join(','))
   ];
-  fs.writeFileSync(csvPath, '﻿' + csvLines.join('\n'), 'utf8'); // BOM for Excel
+  fs.writeFileSync(csvPath, '﻿' + csvLines.join('\n'), 'utf8');
   console.log(`\nreport.csv 저장: ${csvPath}`);
 
-  // 태그별 통계
   const tagCounts = {};
   results.forEach(p => (p.tags || []).forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
   const topTags = Object.entries(tagCounts).sort((a, b) => b[1] - a[1]).slice(0, 10);

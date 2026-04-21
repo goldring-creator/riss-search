@@ -8,6 +8,9 @@ PORT_FILE="$CONFIG_DIR/port"
 
 mkdir -p "$CONFIG_DIR"
 
+# 설치 위치 저장 (앱이 App Translocation 우회용으로 읽음)
+echo "$SCRIPT_DIR" > "$CONFIG_DIR/riss-dir"
+
 # Node.js 설치 확인
 if ! command -v node &> /dev/null; then
   osascript -e 'display dialog "Node.js가 설치되어 있지 않습니다.\n\nnodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행하세요." with title "RISS 논문 수집기" buttons {"확인"} default button "확인" with icon stop'

@@ -415,8 +415,9 @@ input[type="checkbox"] {
 .btn-sm { padding: 7px 12px; font-size: 12px; }
 
 .save-status { font-size: 12px; }
-.save-status.ok  { color: var(--success); }
-.save-status.err { color: var(--danger); }
+.save-status.ok      { color: var(--success); }
+.save-status.err     { color: var(--danger); }
+.save-status.pending { color: var(--accent); }
 
 /* ── Keychain notice ──────────────────────── */
 .keychain-notice {
@@ -560,6 +561,110 @@ input[type="checkbox"] {
 }
 .log-success { color: #78b878; }
 .log-error   { color: #c07070; }
+
+/* ── Credentials description ──────────────── */
+.cred-desc {
+  font-size: 12.5px;
+  color: var(--text-sec);
+  line-height: 1.75;
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  background: var(--accent-dim2);
+  border: 1px solid rgba(196,137,58,.12);
+  border-radius: var(--radius-sm);
+}
+.link-inline {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(196,137,58,.4);
+  transition: color var(--ease), text-decoration-color var(--ease);
+}
+.link-inline:hover {
+  color: var(--accent-hi);
+  text-decoration-color: var(--accent-hi);
+}
+
+/* ── Footer ───────────────────────────────── */
+.app-footer {
+  text-align: center;
+  padding: 24px 28px 32px;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.footer-sep { color: var(--border-mid); }
+
+/* ── Hidden ───────────────────────────────── */
+.hidden { display: none !important; }
+
+/* ── Login screen ─────────────────────────── */
+.login-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 48px 0 80px;
+}
+.login-card {
+  width: 100%;
+  max-width: 460px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px 28px 28px;
+}
+.login-title { margin-bottom: 24px; }
+.login-title h2 {
+  font-family: 'Playfair Display', Georgia, serif;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 10px;
+  letter-spacing: -.2px;
+}
+.login-desc {
+  font-size: 13px;
+  color: var(--text-sec);
+  line-height: 1.75;
+}
+.login-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.btn-login { width: 100%; margin-top: 4px; }
+
+/* ── API key section (inside filters) ────── */
+.api-key-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--border);
+}
+.api-key-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+.api-key-title {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .8px;
+}
+.api-key-desc {
+  font-size: 12px;
+  color: var(--text-sec);
+  line-height: 1.75;
+  margin-bottom: 10px;
+}
 
 /* ── Responsive ───────────────────────────── */
 @media (max-width: 640px) {

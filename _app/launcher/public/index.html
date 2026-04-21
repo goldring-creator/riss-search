@@ -24,54 +24,51 @@
   </div>
 </header>
 
-<main class="main-content">
+<!-- ══════════════════════════════════════════════════
+     화면 1: 로그인
+════════════════════════════════════════════════════ -->
+<main class="main-content" id="screen-login">
 
-  <!-- 자격증명 -->
-  <div class="card" id="card-credentials">
-    <div class="card-header open" onclick="toggleCard('credentials')">
-      <div class="card-header-left">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="login-title">
         <h2>도서관 로그인</h2>
-        <span class="status-badge missing" id="cred-badge">미설정</span>
+        <p class="login-desc">
+          <a href="https://lib.hufs.ac.kr/" target="_blank" class="link-inline">한국외국어대학교 도서관</a>
+          이용자 ID와 PW를 입력하세요.<br>
+          로그인 확인 후 자동으로 저장되며 다음부터 바로 실행됩니다.
+        </p>
       </div>
-      <span class="chevron">▾</span>
-    </div>
-    <div class="card-body" id="body-credentials">
-      <div class="form-row">
+
+      <div class="login-fields">
         <div class="form-group">
           <label>도서관 ID</label>
           <input type="text" id="library-id" placeholder="학번 또는 이용자 ID" autocomplete="username">
         </div>
         <div class="form-group">
           <label>도서관 PW</label>
-          <input type="password" id="library-pw" placeholder="비밀번호" autocomplete="current-password">
+          <input type="password" id="library-pw" placeholder="비밀번호" autocomplete="current-password"
+            onkeydown="if(event.key==='Enter') saveLibraryCredentials()">
         </div>
-        <div class="form-group form-group-action">
-          <label>&nbsp;</label>
-          <div class="action-row">
-            <button class="btn btn-primary btn-sm" onclick="saveLibraryCredentials()">저장</button>
-            <span class="save-status" id="lib-status"></span>
-          </div>
-        </div>
+        <button class="btn btn-primary btn-login" id="btn-verify-creds" onclick="saveLibraryCredentials()">
+          로그인 확인
+        </button>
+        <span class="save-status" id="lib-status"></span>
       </div>
-      <div class="form-row" style="margin-bottom:0">
-        <div class="form-group">
-          <label>Claude API 키 <span class="label-note">— 자동 분류 기능용 (선택)</span></label>
-          <input type="password" id="anthropic-key" placeholder="sk-ant-..." autocomplete="off">
-        </div>
-        <div class="form-group form-group-action">
-          <label>&nbsp;</label>
-          <div class="action-row">
-            <button class="btn btn-ghost btn-sm" onclick="saveAnthropicKey()">저장</button>
-            <span class="save-status" id="api-status"></span>
-          </div>
-        </div>
-      </div>
-      <div class="keychain-notice">
+
+      <div class="keychain-notice" style="margin-top:20px">
         <span class="notice-icon">⚿</span>
-        비밀번호는 macOS Keychain에 암호화 저장됩니다. 처음 저장 시 시스템 팝업이 뜨면 <strong>항상 허용</strong>을 클릭하세요.
+        비밀번호는 macOS Keychain에 암호화 저장됩니다. 처음 저장 시 팝업이 뜨면 <strong>항상 허용</strong>을 클릭하세요.
       </div>
     </div>
   </div>
+
+</main>
+
+<!-- ══════════════════════════════════════════════════
+     화면 2: 메인 (로그인 후)
+════════════════════════════════════════════════════ -->
+<main class="main-content hidden" id="screen-main">
 
   <!-- 키워드 -->
   <div class="card">
@@ -136,16 +133,13 @@
         <label>정렬 방식</label>
         <div class="sort-options">
           <label class="sort-option selected" id="sort-rank">
-            <input type="radio" name="sort" value="rank" checked>
-            정확도순
+            <input type="radio" name="sort" value="rank" checked>정확도순
           </label>
           <label class="sort-option" id="sort-newest">
-            <input type="radio" name="sort" value="newest">
-            최신순
+            <input type="radio" name="sort" value="newest">최신순
           </label>
           <label class="sort-option" id="sort-popular">
-            <input type="radio" name="sort" value="popular">
-            인기도순
+            <input type="radio" name="sort" value="popular">인기도순
           </label>
         </div>
       </div>
@@ -166,7 +160,26 @@
         </div>
         <div class="checkbox-row">
           <input type="checkbox" id="skip-classify" checked>
-          <label for="skip-classify" class="checkbox-label">분류 건너뜀 (API 키 없을 시)</label>
+          <label for="skip-classify" class="checkbox-label">분류 건너뜀 (API 키 / Claude CLI 없을 시)</label>
+        </div>
+      </div>
+
+      <!-- Claude API 키 (선택) -->
+      <div class="api-key-section">
+        <div class="api-key-header">
+          <span class="api-key-title">Claude API 키</span>
+          <span class="label-note">— 자동 분류 기능용 (선택)</span>
+          <span class="status-badge" id="claude-cli-status" style="margin-left:8px"></span>
+        </div>
+        <p class="api-key-desc">
+          API 키가 없으면 Claude CLI가 자동으로 사용됩니다.
+          <a href="https://goldring-creator.github.io/claude_guide_for_edu-reserch/guide/intro-03-installation.html" target="_blank" class="link-inline">Claude CLI 설치 방법</a> ·
+          <a href="https://console.anthropic.com/" target="_blank" class="link-inline">API 키 발급</a>
+        </p>
+        <div class="action-row" style="gap:8px">
+          <input type="password" id="anthropic-key" placeholder="sk-ant-..." autocomplete="off" style="flex:1">
+          <button class="btn btn-ghost btn-sm" onclick="saveAnthropicKey()">저장</button>
+          <span class="save-status" id="api-status"></span>
         </div>
       </div>
     </div>
@@ -195,7 +208,7 @@
       <span id="run-icon">▶</span>
       <span id="run-label">수집 시작</span>
     </button>
-    <p class="run-info" id="run-info">키워드와 도서관 ID를 설정하면 활성화됩니다.</p>
+    <p class="run-info" id="run-info">키워드를 추가하면 활성화됩니다.</p>
   </div>
 
   <!-- 로그 -->
@@ -214,6 +227,12 @@
   </div>
 
 </main>
+
+<footer class="app-footer">
+  <span>© 2025 RISS 논문 수집기 — 개인·학술 연구 목적 허용, 상업적 사용 금지</span>
+  <span class="footer-sep">·</span>
+  <a href="mailto:goldringedu@gmail.com" class="link-inline">goldringedu@gmail.com</a>
+</footer>
 
 <script src="app.js"></script>
 </body>

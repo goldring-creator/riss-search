@@ -28,6 +28,30 @@ function extractKoreanName(authorStr) {
   return authorStr.split('(')[0].trim();
 }
 
+function buildFilename({ authorDisplay, year, title, journal, volume, issue, pages }) {
+  const cleanTitle = title.replace(/[\\/:*?"<>|]/g, '').trim();
+  // APA 한국어 스타일: 저자(연도). 제목. 학술지명, 권(호), 페이지.
+  // 학술지명에서 한글 명칭만 사용 (영문 부제 제거: "교육철학연구(The ...)" → "교육철학연구")
+  const journalKo = journal ? journal.replace(/\s*\([^)]*[a-zA-Z][^)]*\)\s*$/, '').trim() : '';
+  let name = `${authorDisplay}(${year}). ${cleanTitle}`;
+  if (journalKo) {
+    name += `. ${journalKo.replace(/[\\/:*?"<>|]/g, '').trim()}`;
+    if (volume && issue) name += `, ${volume}(${issue})`;
+    else if (volume) name += `, ${volume}`;
+    if (pages) name += `, ${pages}`;
+  }
+  // macOS 파일명 한도 255바이트 (UTF-8), .pdf(4바이트) 제외 → 251바이트
+  const enc = new TextEncoder();
+  let bytes = enc.encode(name);
+  if (bytes.length > 251) {
+    // 바이트 경계에서 자르되 멀티바이트 문자가 잘리지 않도록 디코딩
+    let cut = 251;
+    while (cut > 0 && (bytes[cut] & 0xc0) === 0x80) cut--;
+    name = new TextDecoder().decode(bytes.slice(0, cut)).trimEnd();
+  }
+  return `${name}.pdf`;
+}
+
 async function searchRiss(rissPage, keyword, maxPages = 3, filters = {}) {
   const { yearFrom, yearTo, kciOnly, sortBy } = filters;
   console.log(`\n검색 키워드: "${keyword}" (최대 ${maxPages}페이지)`);
@@ -118,6 +142,17 @@ async function fetchDetail(rissPage, item) {
     await rissPage.goto(item.href);
     await rissPage.waitForTimeout(3000);
 
+    // 국문 초록 섹션의 "더보기"(.moreView) 클릭 → 전체 초록 펼치기
+    try {
+      await rissPage.evaluate(() => {
+        const mv = Array.from(document.querySelectorAll('.moreView')).find(el =>
+          el.parentElement?.textContent?.includes('국문 초록')
+        );
+        mv?.click();
+      });
+      await rissPage.waitForTimeout(2000);
+    } catch {}
+
     const txt = await rissPage.evaluate(() => document.body.innerText);
 
     // 제목: "상세\n{제목}" 패턴
@@ -149,12 +184,23 @@ async function fetchDetail(rissPage, item) {
     const yearMatch = txt.match(/발행연도\s*\n+(\d{4})/);
     const year = yearMatch ? yearMatch[1] : new Date().getFullYear().toString();
 
-    // 초록
-    const abstractMatch = txt.match(/국문 초록 \(Abstract\)\s*\n+([\s\S]+?)(?:\n더보기|\n\n다국어)/);
-    const abstract2 = txt.match(/초록\s*\n+([\s\S]{30,600}?)(?:\n\n|더보기)/);
-    const abstractText = abstractMatch
-      ? abstractMatch[1].trim()
-      : (abstract2 ? abstract2[1].trim() : '');
+    // 초록 (더보기 클릭 후 전체 텍스트 파싱, 최대 2000자)
+    const abstractMatch = txt.match(/국문 초록 \(Abstract\)\s*\n+([\s\S]+?)(?:\n\n다국어|\n영문 초록|\n\nAbstract)/);
+    const abstract2 = txt.match(/초록\s*\n+([\s\S]{30,2000}?)(?:\n\n|\n다국어|\n영문 초록)/);
+    const abstractText = (abstractMatch ? abstractMatch[1].trim() : (abstract2 ? abstract2[1].trim() : '')).replace(/\n더보기$/, '').trim();
+
+    // 학술지명
+    const journalMatch = txt.match(/학술지명\s*\n+([^\n]+)/);
+    const journal = journalMatch ? journalMatch[1].trim() : '';
+
+    // 권(호): "권호사항\n\nVol.48 No.1 [2026]" 형식
+    const volNoMatch = txt.match(/권호사항\s*\n+Vol\.?(\d+)\s+No\.?(\d+)/i);
+    const volume = volNoMatch ? volNoMatch[1] : '';
+    const issue = volNoMatch ? volNoMatch[2] : '';
+
+    // 페이지: "수록면\n\n49-71(23쪽)" 형식
+    const pagesMatch = txt.match(/수록면\s*\n+([\d\-~]+)/);
+    const pages = pagesMatch ? pagesMatch[1] : '';
 
     // 피인용·조회·다운로드 수
     const citMatch = txt.match(/KCI 피인용횟수\s*\n*(\d+)/);
@@ -175,14 +221,17 @@ async function fetchDetail(rissPage, item) {
     const controlNo = item.href.match(/control_no=([^&]+)/)?.[1] || '';
     const pMatType = item.href.match(/p_mat_type=([^&]+)/)?.[1] || '';
 
-    const titleShort = title.replace(/[\\/:*?"<>|]/g, '').substring(0, 20).trim();
-    const filename = `${authorDisplay}(${year}). ${titleShort}.pdf`;
+    const filename = buildFilename({ authorDisplay, year, title, journal, volume, issue, pages });
 
     return {
       title,
       authors: authorList,
       authorDisplay,
       year,
+      journal,
+      volume,
+      issue,
+      pages,
       abstract: abstractText,
       kciCitations,
       viewCount,

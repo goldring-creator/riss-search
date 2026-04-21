@@ -1,11 +1,21 @@
 const express = require('express');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const net = require('net');
 
 const credentials = require('./credentials');
 const config = require('./config');
 const runner = require('./runner');
+
+function findClaudeCli() {
+  try {
+    const p = execSync(
+      'export PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH; which claude 2>/dev/null',
+      { shell: '/bin/bash', encoding: 'utf8' }
+    ).trim();
+    return p || null;
+  } catch { return null; }
+}
 
 const app = express();
 app.use(express.json());
@@ -31,17 +41,14 @@ app.get('/api/config', (req, res) => {
     ...cfg,
     hasLibraryCredentials: cfg.libraryId ? credentials.keychainHas(cfg.libraryId) : false,
     hasAnthropicKey: credentials.keychainHas('__anthropic__'),
+    hasClaudeCli: !!findClaudeCli(),
   });
 });
 
-// ── 자격증명 저장 ──────────────────────────────────────────
+// ── 자격증명 저장 (API 키 전용) ───────────────────────────
 app.post('/api/save-credentials', (req, res) => {
-  const { libraryId, libraryPw, anthropicKey } = req.body;
+  const { anthropicKey } = req.body;
   try {
-    if (libraryId && libraryPw) {
-      credentials.keychainSet(libraryId, libraryPw);
-      config.save({ libraryId, hasLibraryCredentials: true });
-    }
     if (anthropicKey) {
       credentials.keychainSet('__anthropic__', anthropicKey);
       config.save({ hasAnthropicKey: true });
@@ -52,19 +59,62 @@ app.post('/api/save-credentials', (req, res) => {
   }
 });
 
-// ── 폴더 선택 (native macOS picker) ───────────────────────
+// ── 도서관 자격증명 검증 + 저장 ───────────────────────────
+app.post('/api/verify-credentials', async (req, res) => {
+  const { libraryId, libraryPw } = req.body;
+  if (!libraryId || !libraryPw) {
+    return res.status(400).json({ ok: false, error: 'ID와 PW를 모두 입력하세요.' });
+  }
+
+  let browser = null;
+  try {
+    const { chromium } = require('playwright');
+    const { loginAndGetRiss } = require('../core/riss-auth');
+
+    browser = await chromium.launch({ headless: true });
+    const context = await browser.newContext();
+    const rissPage = await loginAndGetRiss(context, { libraryId, libraryPw });
+    await rissPage.close();
+    await context.close();
+
+    // 로그인 성공 → Keychain 저장
+    credentials.keychainSet(libraryId, libraryPw);
+    config.save({ libraryId, hasLibraryCredentials: true });
+    res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  } finally {
+    if (browser) await browser.close().catch(() => {});
+  }
+});
+
+// ── 폴더 선택 (macOS: osascript / Windows: PowerShell) ────
 app.post('/api/pick-folder', (req, res) => {
   try {
-    const result = execSync(
-      `osascript -e 'POSIX path of (choose folder with prompt "다운로드 위치를 선택하세요")'`,
-      { timeout: 30000 }
-    ).toString().trim();
+    let result;
+    if (process.platform === 'win32') {
+      const tmp = require('path').join(require('os').tmpdir(), 'riss_folder.ps1');
+      require('fs').writeFileSync(tmp, `
+Add-Type -AssemblyName System.Windows.Forms
+$d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.Description = '저장 위치를 선택하세요'
+$d.ShowNewFolderButton = $true
+if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }
+`, 'utf8');
+      result = execSync(`powershell -ExecutionPolicy Bypass -File "${tmp}"`, { timeout: 30000 }).toString().trim();
+      try { require('fs').unlinkSync(tmp); } catch {}
+      if (!result) return res.json({ cancelled: true });
+    } else {
+      result = execSync(
+        `osascript -e 'POSIX path of (choose folder with prompt "다운로드 위치를 선택하세요")'`,
+        { timeout: 30000 }
+      ).toString().trim();
+    }
     res.json({ path: result });
   } catch (e) {
     if (e.status === 1) return res.json({ cancelled: true });
     res.status(500).json({ error: e.message });
-  }
-});
+  };
 
 // ── 파이프라인 실행 (Server-Sent Events) ──────────────────
 app.post('/api/run', (req, res) => {
@@ -82,6 +132,8 @@ app.post('/api/run', (req, res) => {
   if (!lpw) return res.status(400).json({ error: '도서관 PW를 먼저 저장하세요.' });
 
   const anthropicKey = credentials.keychainGet('__anthropic__') || process.env.ANTHROPIC_API_KEY;
+  const claudeCliPath = (!anthropicKey && !params.skipClassify) ? findClaudeCli() : null;
+  const useClaudeCli = !!claudeCliPath;
 
   if (params.keywords && params.keywords.length > 0) {
     config.save({ lastKeywords: params.keywords, lastOutputDir: params.outputDir || cfg.lastOutputDir });
@@ -97,7 +149,7 @@ app.post('/api/run', (req, res) => {
   send('start', '파이프라인 시작...\n');
 
   runner.run(
-    { ...params, libraryId: lid, libraryPw: lpw, anthropicKey },
+    { ...params, libraryId: lid, libraryPw: lpw, anthropicKey, useClaudeCli, claudeCliPath },
     (text) => send('log', text),
     (code) => {
       send('end', code === 0 ? '✅ 완료' : `❌ 종료 코드: ${code}`);

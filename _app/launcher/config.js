@@ -8,7 +8,7 @@ const PORT_FILE = path.join(CONFIG_DIR, 'port');
 
 const DEFAULTS = {
   libraryId: '',
-  lastOutputDir: path.join(os.homedir(), 'Desktop', 'RISS_출력'),
+  lastOutputDir: path.join(os.homedir(), 'Downloads', 'RISS_출력'),
   lastKeywords: [],
   pages: 3,
   yearFrom: '',

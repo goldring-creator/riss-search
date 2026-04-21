@@ -5,28 +5,11 @@ on run
 	set configDir to (POSIX path of (path to home folder)) & ".riss"
 	set portFile to configDir & "/port"
 	set logFile to configDir & "/server.log"
+	set rissDirFile to configDir & "/riss-dir"
 	set firstRunFlag to configDir & "/.first_run_done"
-
-	-- 앱 위치에서 _app 디렉토리 경로 도출
-	set appPath to POSIX path of (path to me)
-	set rissDir to do shell script "dirname " & quoted form of appPath
-	set appDir to rissDir & "/_app"
-	set serverScript to appDir & "/launcher/server.js"
 
 	-- 설정 디렉토리 생성
 	do shell script "mkdir -p " & quoted form of configDir
-
-	-- Node.js 탐지 (PATH 확장 포함)
-	set pathSetup to "export PATH=/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:$PATH; [ -s $HOME/.nvm/nvm.sh ] && . $HOME/.nvm/nvm.sh --no-use; [ -d $HOME/.volta/bin ] && export PATH=$HOME/.volta/bin:$PATH; [ -d $HOME/.fnm ] && eval \"$(fnm env 2>/dev/null)\""
-	set nodeExec to ""
-	try
-		set nodeExec to do shell script pathSetup & "; which node"
-	end try
-
-	if nodeExec is "" then
-		display dialog "Node.js가 필요합니다." & return & return & "nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해 주세요." with title "RISS 논문수집기" buttons {"확인"} default button "확인" with icon stop
-		return
-	end if
 
 	-- 이미 실행 중인 서버 확인
 	try
@@ -41,13 +24,50 @@ on run
 	end try
 	do shell script "rm -f " & quoted form of portFile & " 2>/dev/null; true"
 
-	-- _app 폴더 확인
+	-- _app 경로 탐지 (App Translocation 우회)
+	-- 1순위: 앱 실제 위치 기준 상대 경로
+	set appPath to POSIX path of (path to me)
+	set rissDir to do shell script "dirname " & quoted form of appPath
+	set appDir to rissDir & "/_app"
+
+	-- 2순위: RISS-search.command가 기록해둔 실제 설치 경로
+	set appDirFound to false
 	try
 		do shell script "test -d " & quoted form of appDir
-	on error
-		display dialog "_app 폴더를 찾을 수 없습니다." & return & return & "경로: " & appDir with title "RISS 논문수집기" buttons {"확인"} with icon stop
-		return
+		set appDirFound to true
 	end try
+
+	if not appDirFound then
+		try
+			set savedDir to do shell script "cat " & quoted form of rissDirFile & " 2>/dev/null"
+			if savedDir is not "" then
+				set appDir to savedDir & "/_app"
+				try
+					do shell script "test -d " & quoted form of appDir
+					set appDirFound to true
+				end try
+			end if
+		end try
+	end if
+
+	if not appDirFound then
+		display dialog "RISS 논문수집기 폴더를 찾을 수 없습니다." & return & return & "먼저 RISS-search.command를 한 번 실행해 주세요." & return & "(다운로드 폴더에서 우클릭 → 열기)" with title "RISS 논문수집기" buttons {"확인"} default button "확인" with icon stop
+		return
+	end if
+
+	set serverScript to appDir & "/launcher/server.js"
+
+	-- Node.js 탐지 (PATH 확장 포함)
+	set pathSetup to "export PATH=/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:$PATH; [ -s $HOME/.nvm/nvm.sh ] && . $HOME/.nvm/nvm.sh --no-use; [ -d $HOME/.volta/bin ] && export PATH=$HOME/.volta/bin:$PATH; [ -d $HOME/.fnm ] && eval \"$(fnm env 2>/dev/null)\""
+	set nodeExec to ""
+	try
+		set nodeExec to do shell script pathSetup & "; which node"
+	end try
+
+	if nodeExec is "" then
+		display dialog "Node.js가 필요합니다." & return & return & "nodejs.org 에서 LTS 버전을 설치한 뒤 다시 실행해 주세요." with title "RISS 논문수집기" buttons {"확인"} default button "확인" with icon stop
+		return
+	end if
 
 	-- 패키지 설치 (최초 1회)
 	try
@@ -69,7 +89,7 @@ on run
 		end try
 	end try
 
-	-- 서버 백그라운드 실행 (절대경로 사용 → EPERM 없음)
+	-- 서버 백그라운드 실행 (절대경로 사용)
 	set serverCmd to pathSetup
 	set serverCmd to serverCmd & "; nohup " & quoted form of nodeExec
 	set serverCmd to serverCmd & " " & quoted form of serverScript

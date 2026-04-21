@@ -5,6 +5,7 @@ const state = {
   isRunning: false,
   hasLibraryCreds: false,
   hasAnthropicKey: false,
+  hasClaudeCli: false,
 };
 
 // ── 초기화 ────────────────────────────────────────────────
@@ -44,17 +45,23 @@ function applyConfig(cfg) {
   // 자격증명 상태
   state.hasLibraryCreds = cfg.hasLibraryCredentials;
   state.hasAnthropicKey = cfg.hasAnthropicKey;
-  updateCredBadge();
+  state.hasClaudeCli = cfg.hasClaudeCli;
+  updateClaudeStatus();
 
-  // 자격증명이 이미 있으면 카드 접기
-  if (cfg.hasLibraryCredentials) {
-    const body = document.getElementById('body-credentials');
-    const header = document.querySelector('#card-credentials .card-header');
-    body.classList.add('collapsed');
-    header.classList.remove('open');
-  }
+  // 분류 기능: API 키나 Claude CLI 있으면 기본 활성화
+  const canClassify = cfg.hasAnthropicKey || cfg.hasClaudeCli;
+  document.getElementById('skip-classify').checked = !canClassify;
+
+  // 로그인 여부에 따라 화면 전환
+  showScreen(cfg.hasLibraryCredentials ? 'main' : 'login');
 
   updateRunButton();
+}
+
+// ── 화면 전환 ─────────────────────────────────────────────
+function showScreen(name) {
+  document.getElementById('screen-login').classList.toggle('hidden', name !== 'login');
+  document.getElementById('screen-main').classList.toggle('hidden', name !== 'main');
 }
 
 // ── 카드 토글 ─────────────────────────────────────────────
@@ -68,15 +75,31 @@ function toggleCard(id) {
 // ── 태그 입력 ─────────────────────────────────────────────
 function setupTagInput(inputId, wrapId, arr, onChange) {
   const input = document.getElementById(inputId);
+  let isComposing = false;
+
+  input.addEventListener('compositionstart', () => { isComposing = true; });
+  input.addEventListener('compositionend', () => { isComposing = false; });
+
   input.addEventListener('keydown', (e) => {
-    if ((e.key === 'Enter' || e.key === ',') && input.value.trim()) {
+    if (isComposing) return;
+    if (e.key === 'Enter' && input.value.trim()) {
       e.preventDefault();
-      const val = input.value.replace(/,$/, '').trim();
+      const val = input.value.trim();
       if (val) addTag(val, wrapId, arr, inputId, onChange);
     } else if (e.key === 'Backspace' && !input.value && arr.length > 0) {
       removeTag(arr.length - 1, wrapId, arr, inputId, onChange);
     }
   });
+
+  input.addEventListener('input', () => {
+    if (isComposing) return;
+    if (input.value.endsWith(',')) {
+      const val = input.value.slice(0, -1).trim();
+      if (val) addTag(val, wrapId, arr, inputId, onChange);
+      else input.value = '';
+    }
+  });
+
   input.addEventListener('blur', () => {
     const val = input.value.replace(/,$/, '').trim();
     if (val) addTag(val, wrapId, arr, inputId, onChange);
@@ -135,36 +158,40 @@ function getSort() {
   return checked ? checked.value : 'rank';
 }
 
-// ── 자격증명 저장 ─────────────────────────────────────────
+// ── 도서관 자격증명 검증 + 저장 ──────────────────────────
 async function saveLibraryCredentials() {
   const libraryId = document.getElementById('library-id').value.trim();
   const libraryPw = document.getElementById('library-pw').value.trim();
   const status = document.getElementById('lib-status');
+  const btn = document.getElementById('btn-verify-creds');
 
   if (!libraryId || !libraryPw) {
     setStatus(status, '⚠️ ID와 PW 모두 입력하세요', 'err');
     return;
   }
 
+  btn.disabled = true;
+  setStatus(status, '🔄 로그인 확인 중... (10~20초)', 'pending');
+
   try {
-    const r = await fetch('/api/save-credentials', {
+    const r = await fetch('/api/verify-credentials', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ libraryId, libraryPw }),
     });
     const data = await r.json();
     if (data.ok) {
-      setStatus(status, '✅ 저장됨', 'ok');
+      setStatus(status, '✅ 로그인 확인 및 저장 완료', 'ok');
       state.hasLibraryCreds = true;
-      updateCredBadge();
-      updateRunButton();
-      // PW 필드 초기화
       document.getElementById('library-pw').value = '';
+      setTimeout(() => showScreen('main'), 800);
     } else {
       setStatus(status, `❌ ${data.error}`, 'err');
     }
   } catch (e) {
     setStatus(status, `❌ ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -198,14 +225,18 @@ function setStatus(el, msg, cls) {
   setTimeout(() => { if (el.textContent === msg) el.textContent = ''; }, 4000);
 }
 
-function updateCredBadge() {
-  const badge = document.getElementById('cred-badge');
-  if (state.hasLibraryCreds) {
-    badge.textContent = '저장됨';
-    badge.className = 'status-badge ok';
+function updateClaudeStatus() {
+  const el = document.getElementById('claude-cli-status');
+  if (!el) return;
+  if (state.hasAnthropicKey) {
+    el.textContent = 'API 키 사용';
+    el.className = 'status-badge ok';
+  } else if (state.hasClaudeCli) {
+    el.textContent = '로컬 Claude 사용';
+    el.className = 'status-badge ok';
   } else {
-    badge.textContent = '미설정';
-    badge.className = 'status-badge missing';
+    el.textContent = '분류 기능 사용 불가';
+    el.className = 'status-badge missing';
   }
 }
 
