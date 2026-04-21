@@ -67,6 +67,19 @@ function applyFilters(papers, opts) {
   return result;
 }
 
+function fmtMin(seconds) {
+  if (seconds < 60) return `약 ${Math.ceil(seconds)}초`;
+  const m = Math.ceil(seconds / 60);
+  return `약 ${m}분`;
+}
+
+function phaseHeader(n, total, label, estSec) {
+  const est = estSec ? ` (예상 ${fmtMin(estSec)})` : '';
+  console.log(`\n${'─'.repeat(50)}`);
+  console.log(`[${n}/${total}단계] ${label}${est}`);
+  console.log('─'.repeat(50));
+}
+
 async function main() {
   const opts = parseArgs();
 
@@ -110,13 +123,24 @@ async function main() {
       sortBy: opts.sort,
     };
 
-    // 키워드별 순차 검색 후 controlNo 기준 병합
-    console.log('\n[1단계] 문헌 검색 및 메타데이터 수집');
+    // ── 단계 수 계산 ─────────────────────────────────────────
+    const hasAI = !opts.skipClassify;
+    const totalSteps = 1 + (hasAI ? 1 : 0) + (opts.skipDownload ? 0 : 1) + (hasAI ? 1 : 0);
+    let step = 0;
+
+    // ── 1단계: 검색 ─────────────────────────────────────────
+    // 예상: 키워드 × 페이지 × 65초 (페이지 로드 5s + 논문 15건 × 4s)
+    const searchEstSec = opts.keywords.length * opts.pages * 65;
+    phaseHeader(++step, totalSteps, '문헌 검색 및 메타데이터 수집', searchEstSec);
+
     const seenControlNos = new Set();
     let allPapers = [];
+    const totalSearchPages = opts.keywords.length * opts.pages;
+    let pageOffset = 0;
 
     for (const keyword of opts.keywords) {
-      const papers = await runSearch(rissPage, keyword, opts.pages, outputDir, filters);
+      const papers = await runSearch(rissPage, keyword, opts.pages, outputDir, filters, pageOffset, totalSearchPages);
+      pageOffset += opts.pages;
       for (const paper of papers) {
         if (paper.controlNo && seenControlNos.has(paper.controlNo)) {
           console.log(`  (타 키워드 중복) ${paper.title.substring(0, 40)}`);
@@ -131,7 +155,7 @@ async function main() {
     fs.writeFileSync(metadataPath, JSON.stringify(allPapers, null, 2), 'utf8');
 
     if (opts.topN || opts.minCitations > 0 || opts.exclude.length > 0) {
-      console.log('\n[필터링]');
+      console.log('\n[기본 필터 적용]');
       allPapers = applyFilters(allPapers, opts);
       console.log(`  최종 선택: ${allPapers.length}건`);
       fs.writeFileSync(metadataPath, JSON.stringify(allPapers, null, 2), 'utf8');
@@ -143,7 +167,9 @@ async function main() {
       const useClaudeCli = process.env.USE_CLAUDE_CLI === '1';
 
       if (anthropicKey || useClaudeCli) {
-        console.log('\n[2단계] Claude 관련도 필터링');
+        // 예상: 배치(15건) × 10초
+        const filterEstSec = Math.ceil(allPapers.length / 15) * 10;
+        phaseHeader(++step, totalSteps, 'Claude 관련도 필터링', filterEstSec);
         const before = allPapers.length;
         allPapers = await filterByRelevance(
           allPapers,
@@ -157,13 +183,16 @@ async function main() {
     }
 
     if (!opts.skipDownload) {
-      console.log('\n[3단계] 원문 PDF 다운로드');
+      // 예상: 논문 × 30초
+      const dlEstSec = allPapers.filter(p => p.downloadOnclick).length * 30;
+      phaseHeader(++step, totalSteps, '원문 PDF 다운로드', dlEstSec);
       await runDownload(rissPage, metadataPath, pdfsDir);
     }
 
     if (!opts.skipClassify) {
       const classifyKeyword = opts.keywords.join(' / ');
-      console.log('\n[4단계] 주제별 자동 분류 (Claude API)');
+      const classifyCount = JSON.parse(fs.readFileSync(metadataPath, 'utf8')).length;
+      phaseHeader(++step, totalSteps, '주제별 자동 분류', classifyCount * 8);
       await runClassify(metadataPath, pdfsDir, outputDir, classifyKeyword);
     }
 

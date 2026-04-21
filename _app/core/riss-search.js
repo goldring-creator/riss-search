@@ -52,7 +52,7 @@ function buildFilename({ authorDisplay, year, title, journal, volume, issue, pag
   return `${name}.pdf`;
 }
 
-async function searchRiss(rissPage, keyword, maxPages = 3, filters = {}) {
+async function searchRiss(rissPage, keyword, maxPages = 3, filters = {}, pageOffset = 0, totalPages = maxPages) {
   const { yearFrom, yearTo, kciOnly, sortBy } = filters;
   console.log(`\n검색 키워드: "${keyword}" (최대 ${maxPages}페이지)`);
 
@@ -74,7 +74,8 @@ async function searchRiss(rissPage, keyword, maxPages = 3, filters = {}) {
   const papers = [];
 
   for (let pageNum = 1; pageNum <= maxPages; pageNum++) {
-    console.log(`  페이지 ${pageNum} 수집 중...`);
+    const globalPage = pageOffset + pageNum;
+    console.log(`  페이지 [${globalPage}/${totalPages}] 수집 중...`);
 
     // 결과 링크 수집 (제목 링크만, 저널/권호 링크 제외)
     const items = await rissPage.$$eval('a[href*="DetailView"]', els =>
@@ -252,8 +253,8 @@ async function fetchDetail(rissPage, item) {
   }
 }
 
-async function runSearch(rissPage, keyword, maxPages, outputDir, filters = {}) {
-  const papers = await searchRiss(rissPage, keyword, maxPages, filters);
+async function runSearch(rissPage, keyword, maxPages, outputDir, filters = {}, pageOffset = 0, totalPages = maxPages) {
+  const papers = await searchRiss(rissPage, keyword, maxPages, filters, pageOffset, totalPages);
   const outputPath = path.join(outputDir, 'metadata.json');
   fs.writeFileSync(outputPath, JSON.stringify(papers, null, 2), 'utf8');
   console.log(`\n총 ${papers.length}개 논문 메타데이터 저장: ${outputPath}`);

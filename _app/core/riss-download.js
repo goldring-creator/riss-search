@@ -256,12 +256,24 @@ async function attemptDownload(context, rissPage, paper, pdfsDir) {
 }
 
 async function downloadPapers(context, rissPage, papers, pdfsDir) {
-  console.log(`\nPDF 다운로드 시작 (${papers.length}개)`);
+  const downloadable = papers.filter(p => p.downloadOnclick).length;
+  console.log(`\nPDF 다운로드 시작 (원문 제공 ${downloadable}/${papers.length}건)`);
   const results = [];
+  const startTime = Date.now();
+  let doneCount = 0;
 
   for (let i = 0; i < papers.length; i++) {
     const paper = papers[i];
-    console.log(`  [${i + 1}/${papers.length}] ${paper.title.substring(0, 40)}...`);
+    // 남은 시간 추정: 완료된 건 기준 평균 × 남은 건수
+    let etaStr = '';
+    if (doneCount > 0) {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const avgSec = elapsed / doneCount;
+      const remaining = (papers.length - i) * avgSec;
+      const remMin = Math.ceil(remaining / 60);
+      etaStr = remaining < 60 ? ` (약 ${Math.ceil(remaining)}초 남음)` : ` (약 ${remMin}분 남음)`;
+    }
+    console.log(`  [${i + 1}/${papers.length}] ${paper.title.substring(0, 38)}...${etaStr}`);
 
     if (!paper.downloadOnclick) {
       console.log('    원문 미제공');
@@ -275,7 +287,6 @@ async function downloadPapers(context, rissPage, papers, pdfsDir) {
         console.log(`    ✓ 저장: ${path.basename(filepath)}`);
         results.push({ ...paper, filePath: path.join('pdfs', path.basename(filepath)), downloadStatus: 'success' });
       } else if (filepath === null) {
-        // null = DRM 보호 또는 버튼 없음 (오류 아님)
         results.push({ ...paper, downloadStatus: 'no_link' });
       } else {
         console.log('    ✗ 다운로드 실패');
@@ -286,6 +297,7 @@ async function downloadPapers(context, rissPage, papers, pdfsDir) {
       results.push({ ...paper, downloadStatus: 'error', downloadError: err.message });
     }
 
+    doneCount++;
     await rissPage.waitForTimeout(1000);
   }
 
