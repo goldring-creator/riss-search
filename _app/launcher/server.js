@@ -141,10 +141,12 @@ app.post('/api/extract-keywords', upload.single('file'), async (req, res) => {
     let text = '';
 
     if (ext === '.pdf') {
-      const pdfParse = require('pdf-parse');
+      const { PDFParse } = require('pdf-parse');
       const buf = fs.readFileSync(tmpPath);
-      const data = await pdfParse(buf);
+      const parser = new PDFParse({ data: buf });
+      const data = await parser.getText();
       text = data.text;
+      await parser.destroy().catch(() => {});
     } else if (ext === '.docx') {
       const mammoth = require('mammoth');
       const result = await mammoth.extractRawText({ path: tmpPath });
