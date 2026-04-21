@@ -13,6 +13,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupTagInput('kw-input', 'keyword-tag-wrap', state.keywords, updateRunButton);
   setupTagInput('ex-input', 'exclude-tag-wrap', state.excludeKeywords, () => {});
   setupSortOptions();
+  setupDropZone();
 
   try {
     const cfg = await fetch('/api/config').then(r => r.json());
@@ -141,6 +142,70 @@ function renderTags(wrapId, arr, inputId, onChange) {
 
 function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── 파일 업로드 / 드래그앤드롭 ───────────────────────────
+let selectedFile = null;
+
+function setupDropZone() {
+  const zone = document.getElementById('drop-zone');
+  const input = document.getElementById('file-input');
+
+  input.addEventListener('change', () => {
+    if (input.files[0]) setFile(input.files[0]);
+  });
+
+  zone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    zone.classList.add('drag-over');
+  });
+  zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) setFile(file);
+  });
+}
+
+function setFile(file) {
+  const allowed = ['.pdf', '.docx', '.txt'];
+  const ext = '.' + file.name.split('.').pop().toLowerCase();
+  if (!allowed.includes(ext)) {
+    document.getElementById('extract-status').textContent = '⚠️ PDF, DOCX, TXT만 지원합니다';
+    document.getElementById('extract-status').className = 'save-status err';
+    return;
+  }
+  selectedFile = file;
+  document.getElementById('drop-file-name').textContent = file.name;
+  document.getElementById('btn-extract').disabled = false;
+  document.getElementById('extract-status').textContent = '';
+}
+
+async function extractKeywords() {
+  if (!selectedFile) return;
+  const status = document.getElementById('extract-status');
+  const btn = document.getElementById('btn-extract');
+  btn.disabled = true;
+  setStatus(status, '🔄 키워드 추출 중...', 'pending');
+
+  const formData = new FormData();
+  formData.append('file', selectedFile);
+
+  try {
+    const r = await fetch('/api/extract-keywords', { method: 'POST', body: formData });
+    const data = await r.json();
+    if (!r.ok) { setStatus(status, `❌ ${data.error}`, 'err'); return; }
+
+    data.keywords.forEach(kw => {
+      if (kw) addTag(kw, 'keyword-tag-wrap', state.keywords, 'kw-input', updateRunButton);
+    });
+    setStatus(status, `✅ ${data.keywords.length}개 키워드 추출 완료`, 'ok');
+  } catch (e) {
+    setStatus(status, `❌ ${e.message}`, 'err');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 // ── 정렬 버튼 ─────────────────────────────────────────────

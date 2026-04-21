@@ -12,6 +12,9 @@
     "@anthropic-ai/sdk": "^0.90.0",
     "dotenv": "^17.4.2",
     "express": "^4.18.2",
+    "mammoth": "^1.12.0",
+    "multer": "^2.1.1",
+    "pdf-parse": "^2.4.5",
     "playwright": "^1.59.1"
   }
 }

@@ -1,7 +1,10 @@
 const express = require('express');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const { execSync, spawnSync } = require('child_process');
 const net = require('net');
+const multer = require('multer');
 
 const credentials = require('./credentials');
 const config = require('./config');
@@ -20,6 +23,16 @@ function findClaudeCli() {
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+const upload = multer({
+  dest: os.tmpdir(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    const allowed = ['.pdf', '.docx', '.txt'];
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, allowed.includes(ext));
+  },
+});
 
 function findFreePort(start, end) {
   return new Promise((resolve, reject) => {
@@ -114,7 +127,75 @@ if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }
   } catch (e) {
     if (e.status === 1) return res.json({ cancelled: true });
     res.status(500).json({ error: e.message });
-  };
+  }
+});
+
+// ── 파일 업로드 → 키워드 추출 ────────────────────────────
+app.post('/api/extract-keywords', upload.single('file'), async (req, res) => {
+  if (!req.file) return res.status(400).json({ error: '파일이 없거나 지원하지 않는 형식입니다.' });
+
+  const tmpPath = req.file.path;
+  const ext = path.extname(req.file.originalname).toLowerCase();
+
+  try {
+    let text = '';
+
+    if (ext === '.pdf') {
+      const pdfParse = require('pdf-parse');
+      const buf = fs.readFileSync(tmpPath);
+      const data = await pdfParse(buf);
+      text = data.text;
+    } else if (ext === '.docx') {
+      const mammoth = require('mammoth');
+      const result = await mammoth.extractRawText({ path: tmpPath });
+      text = result.value;
+    } else {
+      text = fs.readFileSync(tmpPath, 'utf8');
+    }
+
+    // 3000자로 제한 (Claude 비용 절감)
+    text = text.replace(/\s+/g, ' ').trim().slice(0, 3000);
+    if (!text) return res.status(400).json({ error: '텍스트를 추출할 수 없습니다.' });
+
+    // Claude로 키워드 추출
+    const anthropicKey = credentials.keychainGet('__anthropic__') || process.env.ANTHROPIC_API_KEY;
+    let keywords = [];
+
+    if (anthropicKey) {
+      const Anthropic = require('@anthropic-ai/sdk');
+      const client = new Anthropic({ apiKey: anthropicKey });
+      const msg = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
+        messages: [{
+          role: 'user',
+          content: `다음 연구 내용을 읽고, RISS에서 관련 논문을 검색할 한국어 키워드 3~5개를 추출하세요.
+키워드만 쉼표로 구분하여 한 줄로 출력하세요. 설명 없이 키워드만.
+
+연구 내용:
+${text}`,
+        }],
+      });
+      keywords = msg.content[0].text.split(',').map(k => k.trim()).filter(Boolean);
+    } else {
+      const claudeCliPath = findClaudeCli();
+      if (!claudeCliPath) return res.status(400).json({ error: 'Claude API 키 또는 Claude CLI가 필요합니다.' });
+      const prompt = `다음 연구 내용을 읽고, RISS에서 관련 논문을 검색할 한국어 키워드 3~5개를 추출하세요.\n키워드만 쉼표로 구분하여 한 줄로 출력하세요. 설명 없이 키워드만.\n\n연구 내용:\n${text}`;
+      const r = spawnSync(claudeCliPath, ['-p', prompt], {
+        encoding: 'utf8', timeout: 60000,
+        env: { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}` },
+      });
+      if (r.error) return res.status(500).json({ error: `Claude CLI 오류: ${r.error.message}` });
+      keywords = r.stdout.split(',').map(k => k.trim()).filter(Boolean);
+    }
+
+    res.json({ keywords });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch {}
+  }
+});
 
 // ── 파이프라인 실행 (Server-Sent Events) ──────────────────
 app.post('/api/run', (req, res) => {

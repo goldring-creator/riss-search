@@ -70,11 +70,37 @@
 ════════════════════════════════════════════════════ -->
 <main class="main-content hidden" id="screen-main">
 
+  <!-- 파일 업로드 -->
+  <div class="card">
+    <div class="card-header open" onclick="toggleCard('upload')">
+      <div class="card-header-left">
+        <span class="card-num">01</span>
+        <h2>파일로 키워드 자동 추출</h2>
+      </div>
+      <span class="chevron">▾</span>
+    </div>
+    <div class="card-body" id="body-upload">
+      <p class="upload-desc">연구 설계와 관련된 내용(간단한 서론 등)을 업로드 해주시면 내용과 관련한 참고문헌을 서치합니다.</p>
+      <p class="upload-types">지원 형식: <span class="type-badge">PDF</span> <span class="type-badge">DOCX</span> <span class="type-badge">TXT</span></p>
+      <div class="drop-zone" id="drop-zone">
+        <input type="file" id="file-input" accept=".pdf,.docx,.txt" style="display:none">
+        <div class="drop-icon">↑</div>
+        <p class="drop-hint">파일을 여기에 드래그 앤 드롭하세요</p>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('file-input').click()">파일 탐색</button>
+        <p class="drop-file-name" id="drop-file-name"></p>
+      </div>
+      <div class="action-row" style="margin-top:12px">
+        <button class="btn btn-primary" id="btn-extract" onclick="extractKeywords()" disabled>키워드 추출</button>
+        <span class="save-status" id="extract-status"></span>
+      </div>
+    </div>
+  </div>
+
   <!-- 키워드 -->
   <div class="card">
     <div class="card-header open" onclick="toggleCard('keywords')">
       <div class="card-header-left">
-        <span class="card-num">01</span>
+        <span class="card-num">02</span>
         <h2>검색 키워드</h2>
       </div>
       <span class="chevron">▾</span>
@@ -93,7 +119,7 @@
   <div class="card">
     <div class="card-header" onclick="toggleCard('filters')">
       <div class="card-header-left">
-        <span class="card-num">02</span>
+        <span class="card-num">03</span>
         <h2>검색 필터 및 옵션</h2>
       </div>
       <span class="chevron">▾</span>
@@ -189,7 +215,7 @@
   <div class="card">
     <div class="card-header open" onclick="toggleCard('output')">
       <div class="card-header-left">
-        <span class="card-num">03</span>
+        <span class="card-num">04</span>
         <h2>저장 위치</h2>
       </div>
       <span class="chevron">▾</span>
