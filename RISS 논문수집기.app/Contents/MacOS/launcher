@@ -1,6 +1,11 @@
 #!/bin/bash
 # RISS 논문수집기 .app launcher
-# 위치: RISS 논문수집기.app/Contents/MacOS/launcher
+
+# PATH 확장 — .app 실행 시 PATH가 최소화되므로 Node.js 설치 경로를 직접 추가
+export PATH="/usr/local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:$PATH"
+[ -s "$HOME/.nvm/nvm.sh" ]  && source "$HOME/.nvm/nvm.sh" --no-use
+[ -d "$HOME/.volta/bin" ]   && export PATH="$HOME/.volta/bin:$PATH"
+[ -d "$HOME/.fnm" ]         && eval "$(fnm env 2>/dev/null)"
 
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 RISS_DIR="$(cd "$THIS_DIR/../../../" && pwd)"
@@ -49,12 +54,19 @@ fi
 cd "$APP_DIR"
 node launcher/server.js >>"$LOG_FILE" 2>&1 &
 
-# 서버 준비 대기 후 브라우저 열기
+# 서버 준비 대기
 for i in $(seq 1 30); do
   sleep 0.5
   if [ -f "$PORT_FILE" ]; then
     PORT=$(cat "$PORT_FILE" 2>/dev/null)
     if [ -n "$PORT" ] && curl -sf "http://127.0.0.1:$PORT/api/config" >/dev/null 2>&1; then
+      # 첫 실행 안내 (1회만)
+      FIRST_RUN="$CONFIG_DIR/.first_run_done"
+      if [ ! -f "$FIRST_RUN" ]; then
+        touch "$FIRST_RUN"
+        CHOICE=$(osascript -e 'display dialog "처음 실행하셨군요!\n\n다른 기기에 배포 시 보안 차단이 뜰 경우:\n시스템 설정 → 개인정보 보호 및 보안\n→ 화면 하단 \"그래도 열기\" 클릭\n\n지금 시스템 설정을 여시겠어요?" with title "RISS 논문수집기" buttons {"닫기", "시스템 설정 열기"} default button "닫기" with icon note' 2>/dev/null)
+        [[ "$CHOICE" == *"시스템 설정 열기"* ]] && open "x-apple.systempreferences:com.apple.preference.security"
+      fi
       open "http://127.0.0.1:$PORT"
       exit 0
     fi
