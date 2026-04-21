@@ -2,15 +2,19 @@ const { spawnSync } = require('child_process');
 
 const BATCH_SIZE = 15;
 
-function buildPrompt(papers, keywords) {
+function buildPrompt(papers, keywords, researchContext) {
   const list = papers.map((p, i) => {
     const abstract = p.abstract ? p.abstract.replace(/\s+/g, ' ').trim().slice(0, 300) : '없음';
     return `[${i + 1}] 제목: ${p.title}\n초록: ${abstract}`;
   }).join('\n\n');
 
-  return `연구 키워드: ${keywords.join(', ')}
+  const contextLine = researchContext
+    ? `연구 맥락:\n${researchContext}\n\n검색 키워드: ${keywords.join(', ')}`
+    : `연구 키워드: ${keywords.join(', ')}`;
 
-아래 논문 목록에서 위 키워드와 직접 관련된 논문의 번호만 쉼표로 나열하세요.
+  return `${contextLine}
+
+아래 논문 목록에서 위 연구의 선행연구·이론적 배경으로 활용 가능한 논문의 번호만 쉼표로 나열하세요.
 관련 없는 논문은 제외하세요. 숫자와 쉼표만 출력하세요.
 
 ${list}`;
@@ -25,7 +29,7 @@ function parseIndices(text, batchLen) {
 }
 
 async function assessBatch(papers, keywords, opts) {
-  const prompt = buildPrompt(papers, keywords);
+  const prompt = buildPrompt(papers, keywords, opts.researchContext);
 
   let responseText = '';
 

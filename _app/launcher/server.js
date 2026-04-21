@@ -160,8 +160,24 @@ app.post('/api/extract-keywords', upload.single('file'), async (req, res) => {
     text = text.replace(/\s+/g, ' ').trim().slice(0, 3000);
     if (!text) return res.status(400).json({ error: '텍스트를 추출할 수 없습니다.' });
 
-    // Claude로 키워드 추출
+    // Claude로 연구 맥락 + 키워드 추출
     const anthropicKey = credentials.keychainGet('__anthropic__') || process.env.ANTHROPIC_API_KEY;
+
+    const extractPrompt = `다음 연구 텍스트를 분석하여 RISS 논문 검색에 최적화된 정보를 추출하세요.
+
+텍스트:
+${text}
+
+[규칙]
+- primaryConcepts: 핵심 이론·개념 2~3개
+- secondaryConcepts: 관련 맥락·배경 개념 2~3개
+- keywords: 핵심×핵심, 핵심×관련 조합 쿼리 8~12개 (각 2~3어절, 4단어 이상 금지, "분석/과정/연구" 끝에 붙이기 금지)
+- researchContext: 연구 주제·핵심 개념·연구자 배경을 2~3문장으로 요약
+
+JSON만 출력하세요:
+{"researchContext":"...","primaryConcepts":["..."],"secondaryConcepts":["..."],"keywords":["..."]}`;
+
+    let researchContext = '';
     let keywords = [];
 
     if (anthropicKey) {
@@ -169,41 +185,96 @@ app.post('/api/extract-keywords', upload.single('file'), async (req, res) => {
       const client = new Anthropic({ apiKey: anthropicKey });
       const msg = await client.messages.create({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 200,
-        messages: [{
-          role: 'user',
-          content: `다음 연구 내용을 분석하여 RISS 국내 학술논문 검색에 최적화된 검색어 3~5개를 생성하세요.
-
-조건:
-- 핵심 개념 2~3개를 조합한 구체적인 표현 (예: 초임교사 정체성 형성, 교직 전문성 개발)
-- "분석", "과정", "연구" 같은 방법·행위 단어는 검색어 끝에 붙이지 말 것
-- "교육", "학교" 같은 단독 광범위 단어 사용 금지
-- 동의어/유사 개념으로 다양한 결과 커버
-
-검색어만 쉼표로 구분하여 한 줄로 출력하세요. 설명 없이.
-
-연구 내용:
-${text}`,
-        }],
+        max_tokens: 600,
+        messages: [{ role: 'user', content: extractPrompt }],
       });
-      keywords = msg.content[0].text.split(',').map(k => k.trim()).filter(Boolean);
+      try {
+        const json = JSON.parse(msg.content[0].text.match(/\{[\s\S]+\}/)[0]);
+        keywords = (json.keywords || []).map(k => k.trim()).filter(Boolean);
+        researchContext = json.researchContext || '';
+      } catch {
+        keywords = msg.content[0].text.split(',').map(k => k.trim()).filter(Boolean);
+      }
     } else {
       const claudeCliPath = findClaudeCli();
       if (!claudeCliPath) return res.status(400).json({ error: 'Claude API 키 또는 Claude CLI가 필요합니다.' });
-      const prompt = `다음 연구 내용을 분석하여 RISS 국내 학술논문 검색에 최적화된 검색어 3~5개를 생성하세요.\n\n조건:\n- 핵심 개념 2~3개를 조합한 구체적인 표현 (예: 초임교사 정체성 형성, 교직 전문성 개발)\n- "분석", "과정", "연구" 같은 방법·행위 단어는 검색어 끝에 붙이지 말 것\n- "교육", "학교" 같은 단독 광범위 단어 사용 금지\n- 동의어/유사 개념으로 다양한 결과 커버\n\n검색어만 쉼표로 구분하여 한 줄로 출력하세요. 설명 없이.\n\n연구 내용:\n${text}`;
+      const r = spawnSync(claudeCliPath, ['-p', extractPrompt], {
+        encoding: 'utf8', timeout: 60000,
+        env: { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}` },
+      });
+      if (r.error) return res.status(500).json({ error: `Claude CLI 오류: ${r.error.message}` });
+      try {
+        const json = JSON.parse(r.stdout.match(/\{[\s\S]+\}/)[0]);
+        keywords = (json.keywords || []).map(k => k.trim()).filter(Boolean);
+        researchContext = json.researchContext || '';
+      } catch {
+        keywords = r.stdout.split(',').map(k => k.trim()).filter(Boolean);
+      }
+    }
+
+    res.json({ keywords, researchContext });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  } finally {
+    try { fs.unlinkSync(tmpPath); } catch {}
+  }
+});
+
+// ── 연구 맥락 텍스트 → 키워드 생성 ──────────────────────
+app.post('/api/extract-from-context', async (req, res) => {
+  const { contextText } = req.body;
+  if (!contextText || !contextText.trim()) {
+    return res.status(400).json({ error: '연구 맥락 텍스트가 없습니다.' });
+  }
+
+  const anthropicKey = credentials.keychainGet('__anthropic__') || process.env.ANTHROPIC_API_KEY;
+
+  const prompt = `다음 연구 맥락에서 RISS 논문 검색 키워드를 생성하세요.
+
+연구 맥락: ${contextText.trim().slice(0, 1000)}
+
+[규칙]
+- 핵심 개념 2~3개 + 관련 개념 2~3개 추출
+- 핵심×핵심, 핵심×관련 조합으로 8~12개 쿼리 생성
+- 각 쿼리 2~3어절, 4단어 이상 금지
+- "분석/과정/연구" 같은 방법 단어 끝에 붙이기 금지
+
+JSON만 출력: {"keywords":["..."]}`;
+
+  try {
+    let keywords = [];
+    if (anthropicKey) {
+      const Anthropic = require('@anthropic-ai/sdk');
+      const client = new Anthropic({ apiKey: anthropicKey });
+      const msg = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 400,
+        messages: [{ role: 'user', content: prompt }],
+      });
+      try {
+        const json = JSON.parse(msg.content[0].text.match(/\{[\s\S]+\}/)[0]);
+        keywords = (json.keywords || []).map(k => k.trim()).filter(Boolean);
+      } catch {
+        keywords = msg.content[0].text.split(',').map(k => k.trim()).filter(Boolean);
+      }
+    } else {
+      const claudeCliPath = findClaudeCli();
+      if (!claudeCliPath) return res.status(400).json({ error: 'Claude API 키 또는 Claude CLI가 필요합니다.' });
       const r = spawnSync(claudeCliPath, ['-p', prompt], {
         encoding: 'utf8', timeout: 60000,
         env: { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}` },
       });
       if (r.error) return res.status(500).json({ error: `Claude CLI 오류: ${r.error.message}` });
-      keywords = r.stdout.split(',').map(k => k.trim()).filter(Boolean);
+      try {
+        const json = JSON.parse(r.stdout.match(/\{[\s\S]+\}/)[0]);
+        keywords = (json.keywords || []).map(k => k.trim()).filter(Boolean);
+      } catch {
+        keywords = r.stdout.split(',').map(k => k.trim()).filter(Boolean);
+      }
     }
-
     res.json({ keywords });
   } catch (e) {
     res.status(500).json({ error: e.message });
-  } finally {
-    try { fs.unlinkSync(tmpPath); } catch {}
   }
 });
 
@@ -242,7 +313,7 @@ app.post('/api/run', (req, res) => {
   const resolvedOutputDir = params.outputDir || path.join(__dirname, '..', 'output');
 
   runner.run(
-    { ...params, libraryId: lid, libraryPw: lpw, anthropicKey, useClaudeCli, claudeCliPath },
+    { ...params, libraryId: lid, libraryPw: lpw, anthropicKey, useClaudeCli, claudeCliPath, researchContext: params.researchContext || null },
     (text) => send('log', text),
     (code) => {
       if (code === 0) {

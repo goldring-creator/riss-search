@@ -82,6 +82,7 @@ function phaseHeader(n, total, label, estSec) {
 
 async function main() {
   const opts = parseArgs();
+  opts.researchContext = process.env.RISS_RESEARCH_CONTEXT || null;
 
   if (opts.keywords.length === 0) {
     console.error('사용법: node riss-main.js --keyword "검색어1" [--keyword "검색어2"] [--library-id ID] [--library-pw PW] [--output-dir /path] [--pages 3] ...');
@@ -174,7 +175,7 @@ async function main() {
         allPapers = await filterByRelevance(
           allPapers,
           opts.keywords,
-          { anthropicKey, claudeCliPath, useClaudeCli },
+          { anthropicKey, claudeCliPath, useClaudeCli, researchContext: opts.researchContext },
           (msg) => process.stdout.write(msg + '\n')
         );
         console.log(`\n  관련도 필터 결과: ${before}건 → ${allPapers.length}건 (${before - allPapers.length}건 제외)`);
@@ -193,7 +194,7 @@ async function main() {
       const classifyKeyword = opts.keywords.join(' / ');
       const classifyCount = JSON.parse(fs.readFileSync(metadataPath, 'utf8')).length;
       phaseHeader(++step, totalSteps, '주제별 자동 분류', classifyCount * 8);
-      await runClassify(metadataPath, pdfsDir, outputDir, classifyKeyword);
+      await runClassify(metadataPath, pdfsDir, outputDir, classifyKeyword, opts.researchContext);
     }
 
     console.log('\n' + '='.repeat(50));

@@ -36,6 +36,7 @@ function run(params, onData, onEnd) {
   if (params.anthropicKey) env.ANTHROPIC_API_KEY = params.anthropicKey;
   if (params.useClaudeCli) env.USE_CLAUDE_CLI = '1';
   if (params.claudeCliPath) env.CLAUDE_CLI_PATH = params.claudeCliPath;
+  if (params.researchContext) env.RISS_RESEARCH_CONTEXT = params.researchContext;
 
   activeProcess = spawn('node', [path.join(CORE_DIR, 'riss-main.js'), ...args], {
     cwd: CORE_DIR,

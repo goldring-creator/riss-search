@@ -7,6 +7,7 @@ const state = {
   hasAnthropicKey: false,
   hasClaudeCli: false,
   lastOutputDir: null,
+  researchContext: '',
 };
 
 // ── 초기화 ────────────────────────────────────────────────
@@ -15,6 +16,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupTagInput('ex-input', 'exclude-tag-wrap', state.excludeKeywords, () => {});
   setupSortOptions();
   setupDropZone();
+  setupAnalyzeButton();
 
   try {
     const cfg = await fetch('/api/config').then(r => r.json());
@@ -172,8 +174,10 @@ function setFile(file) {
   selectedFile = file;
   document.getElementById('drop-file-name').textContent = file.name;
   document.getElementById('drop-file-row').style.display = 'flex';
-  document.getElementById('btn-extract').disabled = false;
+  document.getElementById('badge-file').classList.remove('hidden');
+  document.getElementById('btn-analyze').disabled = false;
   document.getElementById('extract-status').textContent = '';
+  updateRunButton();
 }
 
 function clearAllKeywords() {
@@ -187,30 +191,77 @@ function clearFile() {
   selectedFile = null;
   document.getElementById('drop-file-name').textContent = '';
   document.getElementById('drop-file-row').style.display = 'none';
-  document.getElementById('btn-extract').disabled = true;
+  document.getElementById('badge-file').classList.add('hidden');
+  document.getElementById('btn-analyze').disabled = !document.getElementById('research-context').value.trim();
   document.getElementById('extract-status').textContent = '';
   document.getElementById('file-input').value = '';
+  updateRunButton();
 }
 
-async function extractKeywords() {
-  if (!selectedFile) return;
-  const status = document.getElementById('extract-status');
-  const btn = document.getElementById('btn-extract');
-  btn.disabled = true;
-  setStatus(status, '🔄 키워드 추출 중...', 'pending');
+function onContextInput() {
+  const val = document.getElementById('research-context').value.trim();
+  state.researchContext = val;
+  document.getElementById('badge-context').classList.toggle('hidden', !val);
+  document.getElementById('btn-analyze').disabled = !val && !selectedFile;
+  updateRunButton();
+}
 
-  const formData = new FormData();
-  formData.append('file', selectedFile);
+function setupAnalyzeButton() {
+  // 맥락 분석 버튼은 파일 OR 맥락 텍스트 있을 때 활성
+  // (초기 상태: 둘 다 없으므로 disabled, setFile/onContextInput에서 관리)
+}
+
+async function analyzeResearch() {
+  const status = document.getElementById('extract-status');
+  const btn = document.getElementById('btn-analyze');
+  btn.disabled = true;
 
   try {
-    const r = await fetch('/api/extract-keywords', { method: 'POST', body: formData });
-    const data = await r.json();
-    if (!r.ok) { setStatus(status, `❌ ${data.error}`, 'err'); return; }
+    let keywords = [];
+    let researchContext = '';
 
-    data.keywords.forEach(kw => {
+    if (selectedFile) {
+      // 파일 있으면 파일 분석 → 맥락 + 키워드
+      setStatus(status, '🔄 파일 분석 중...', 'pending');
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      const r = await fetch('/api/extract-keywords', { method: 'POST', body: formData });
+      const data = await r.json();
+      if (!r.ok) { setStatus(status, `❌ ${data.error}`, 'err'); return; }
+      keywords = data.keywords || [];
+      researchContext = data.researchContext || '';
+
+      // 맥락 텍스트란에 자동 채우기 (비어 있을 때만)
+      const ctxEl = document.getElementById('research-context');
+      if (researchContext && !ctxEl.value.trim()) {
+        ctxEl.value = researchContext;
+        state.researchContext = researchContext;
+        document.getElementById('badge-context').classList.remove('hidden');
+      }
+    } else {
+      // 파일 없고 맥락 텍스트만 있으면 → 키워드만 생성
+      const contextText = document.getElementById('research-context').value.trim();
+      if (!contextText) { setStatus(status, '⚠️ 파일 또는 연구 맥락을 입력하세요', 'err'); return; }
+      setStatus(status, '🔄 키워드 생성 중...', 'pending');
+      const r = await fetch('/api/extract-from-context', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contextText }),
+      });
+      const data = await r.json();
+      if (!r.ok) { setStatus(status, `❌ ${data.error}`, 'err'); return; }
+      keywords = data.keywords || [];
+    }
+
+    keywords.forEach(kw => {
       if (kw) addTag(kw, 'keyword-tag-wrap', state.keywords, 'kw-input', updateRunButton);
     });
-    setStatus(status, `✅ ${data.keywords.length}개 키워드 추출 완료`, 'ok');
+
+    const msg = selectedFile
+      ? `✅ 맥락 추출 + 키워드 ${keywords.length}개 생성`
+      : `✅ 키워드 ${keywords.length}개 생성`;
+    setStatus(status, msg, 'ok');
+    updateRunButton();
   } catch (e) {
     setStatus(status, `❌ ${e.message}`, 'err');
   } finally {
@@ -347,18 +398,35 @@ function updateRunButton() {
   const btn = document.getElementById('btn-run');
   const info = document.getElementById('run-info');
   const hasKw = state.keywords.length > 0;
+  const hasContext = state.researchContext.trim().length > 0;
+  const hasInput = hasKw || hasContext;
   const hasCreds = state.hasLibraryCreds;
 
+  // 키워드 전체 삭제 버튼
   const clearBtn = document.getElementById('btn-clear-keywords');
   if (clearBtn) clearBtn.style.display = hasKw ? 'inline-block' : 'none';
 
-  btn.disabled = !hasKw || !hasCreds || state.isRunning;
+  // 키워드 뱃지
+  const kwBadge = document.getElementById('badge-keywords');
+  const kwCount = document.getElementById('badge-kw-count');
+  if (kwBadge) {
+    kwBadge.classList.toggle('hidden', !hasKw);
+    if (kwCount) kwCount.textContent = state.keywords.length;
+  }
 
-  if (!hasKw && !hasCreds) info.textContent = '키워드와 도서관 ID를 설정하면 활성화됩니다.';
-  else if (!hasKw) info.textContent = '검색 키워드를 추가해 주세요.';
+  btn.disabled = !hasInput || !hasCreds || state.isRunning;
+
+  if (!hasInput && !hasCreds) info.textContent = '연구 설정(파일·맥락·키워드 중 하나)과 도서관 ID를 설정하면 활성화됩니다.';
+  else if (!hasInput) info.textContent = '파일 업로드, 연구 맥락, 또는 검색 키워드 중 하나를 입력하세요.';
   else if (!hasCreds) info.textContent = '도서관 ID를 저장해 주세요.';
   else if (state.isRunning) info.textContent = '실행 중...';
-  else info.textContent = `키워드 ${state.keywords.length}개 · 페이지 ${document.getElementById('pages').value}개 수집 준비`;
+  else {
+    const parts = [];
+    if (hasKw) parts.push(`키워드 ${state.keywords.length}개`);
+    if (hasContext) parts.push('연구 맥락 입력됨');
+    parts.push(`페이지 ${document.getElementById('pages').value}개`);
+    info.textContent = parts.join(' · ') + ' · 수집 준비';
+  }
 }
 
 // ── 실행 / 중단 ───────────────────────────────────────────
@@ -374,6 +442,7 @@ async function startPipeline() {
   const params = {
     keywords: [...state.keywords],
     excludeKeywords: [...state.excludeKeywords],
+    researchContext: state.researchContext || null,
     pages: parseInt(document.getElementById('pages').value) || 3,
     yearFrom: document.getElementById('year-from').value || null,
     yearTo: document.getElementById('year-to').value || null,

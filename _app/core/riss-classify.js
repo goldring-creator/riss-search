@@ -3,14 +3,18 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 // ── 1차: 전체 논문 목록 → 공통 카테고리 3~5개 생성 ──────
-function buildCategoryPrompt(papers, keyword) {
+function buildCategoryPrompt(papers, keyword, researchContext) {
   const list = papers.map((p, i) =>
     `[${i + 1}] ${p.title} (${p.year})`
   ).join('\n');
 
-  return `연구 주제 키워드: "${keyword}"
+  const contextLine = researchContext
+    ? `연구 맥락:\n${researchContext}`
+    : `연구 주제 키워드: "${keyword}"`;
 
-다음 논문 ${papers.length}편을 보고, 이 논문들을 묶을 수 있는 주제 카테고리 3~5개를 만드세요.
+  return `${contextLine}
+
+다음 논문 ${papers.length}편을 보고, 이 연구의 관점에서 유의미한 주제 카테고리 3~5개를 만드세요.
 카테고리는 논문들의 실제 내용을 반영하여 서로 겹치지 않아야 합니다.
 카테고리 이름은 10자 이내 한국어로 작성하세요.
 
@@ -75,7 +79,7 @@ async function callClaude(prompt) {
   return callApi(prompt);
 }
 
-async function runClassify(metadataPath, pdfsDir, outputDir, keyword) {
+async function runClassify(metadataPath, pdfsDir, outputDir, keyword, researchContext) {
   const hasApiKey = !!process.env.ANTHROPIC_API_KEY;
   const hasClaudeCli = process.env.USE_CLAUDE_CLI === '1';
 
@@ -91,7 +95,7 @@ async function runClassify(metadataPath, pdfsDir, outputDir, keyword) {
   console.log(`\n카테고리 생성 중... (${papers.length}편 분석)`);
   let categories = ['기타'];
   try {
-    const catText = await callClaude(buildCategoryPrompt(papers, keyword));
+    const catText = await callClaude(buildCategoryPrompt(papers, keyword, researchContext));
     const parsed = parseJson(catText);
     if (parsed.categories && parsed.categories.length > 0) {
       categories = parsed.categories;
