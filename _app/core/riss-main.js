@@ -8,6 +8,7 @@ const { loginAndGetRiss } = require('./riss-auth');
 const { runSearch } = require('./riss-search');
 const { runDownload } = require('./riss-download');
 const { runClassify } = require('./riss-classify');
+const { filterByRelevance } = require('./riss-filter');
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -136,14 +137,33 @@ async function main() {
       fs.writeFileSync(metadataPath, JSON.stringify(allPapers, null, 2), 'utf8');
     }
 
+    if (!opts.skipClassify) {
+      const anthropicKey = opts.anthropicKey || process.env.ANTHROPIC_API_KEY;
+      const claudeCliPath = process.env.CLAUDE_CLI_PATH;
+      const useClaudeCli = process.env.USE_CLAUDE_CLI === '1';
+
+      if (anthropicKey || useClaudeCli) {
+        console.log('\n[2단계] Claude 관련도 필터링');
+        const before = allPapers.length;
+        allPapers = await filterByRelevance(
+          allPapers,
+          opts.keywords,
+          { anthropicKey, claudeCliPath, useClaudeCli },
+          (msg) => process.stdout.write(msg + '\n')
+        );
+        console.log(`\n  관련도 필터 결과: ${before}건 → ${allPapers.length}건 (${before - allPapers.length}건 제외)`);
+        fs.writeFileSync(metadataPath, JSON.stringify(allPapers, null, 2), 'utf8');
+      }
+    }
+
     if (!opts.skipDownload) {
-      console.log('\n[2단계] 원문 PDF 다운로드');
+      console.log('\n[3단계] 원문 PDF 다운로드');
       await runDownload(rissPage, metadataPath, pdfsDir);
     }
 
     if (!opts.skipClassify) {
       const classifyKeyword = opts.keywords.join(' / ');
-      console.log('\n[3단계] 주제별 자동 분류 (Claude API)');
+      console.log('\n[4단계] 주제별 자동 분류 (Claude API)');
       await runClassify(metadataPath, pdfsDir, outputDir, classifyKeyword);
     }
 
