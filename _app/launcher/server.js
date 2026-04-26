@@ -9,6 +9,7 @@ const multer = require('multer');
 const credentials = require('./credentials');
 const config = require('./config');
 const runner = require('./runner');
+const { PROFILES } = require('../core/university-profiles');
 
 function findClaudeCli() {
   try {
@@ -47,12 +48,18 @@ function findFreePort(start, end) {
   });
 }
 
+// ── 대학 목록 ──────────────────────────────────────────────
+app.get('/api/universities', (req, res) => {
+  res.json(Object.entries(PROFILES).map(([id, p]) => ({ id, name: p.name, libraryUrl: p.libraryUrl })));
+});
+
 // ── 설정 로드 ──────────────────────────────────────────────
 app.get('/api/config', (req, res) => {
   const cfg = config.load();
+  const universityId = cfg.selectedUniversity || 'hufs';
   res.json({
     ...cfg,
-    hasLibraryCredentials: cfg.libraryId ? credentials.keychainHas(cfg.libraryId) : false,
+    hasLibraryCredentials: credentials.keychainHas(universityId),
     hasAnthropicKey: credentials.keychainHas('__anthropic__'),
     hasClaudeCli: !!findClaudeCli(),
   });
@@ -74,9 +81,13 @@ app.post('/api/save-credentials', (req, res) => {
 
 // ── 도서관 자격증명 검증 + 저장 ───────────────────────────
 app.post('/api/verify-credentials', async (req, res) => {
-  const { libraryId, libraryPw } = req.body;
-  if (!libraryId || !libraryPw) {
-    return res.status(400).json({ ok: false, error: 'ID와 PW를 모두 입력하세요.' });
+  const { universityId, libraryId, libraryPw } = req.body;
+  if (!universityId || !libraryId || !libraryPw) {
+    return res.status(400).json({ ok: false, error: '대학, ID, PW를 모두 입력하세요.' });
+  }
+  const profile = PROFILES[universityId];
+  if (!profile) {
+    return res.status(400).json({ ok: false, error: `지원하지 않는 대학: ${universityId}` });
   }
 
   let browser = null;
@@ -86,13 +97,13 @@ app.post('/api/verify-credentials', async (req, res) => {
 
     browser = await chromium.launch({ headless: true });
     const context = await browser.newContext();
-    const rissPage = await loginAndGetRiss(context, { libraryId, libraryPw });
+    const rissPage = await loginAndGetRiss(context, { universityId, profile, libraryId, libraryPw });
     await rissPage.close();
     await context.close();
 
-    // 로그인 성공 → Keychain 저장
-    credentials.keychainSet(libraryId, libraryPw);
-    config.save({ libraryId, hasLibraryCredentials: true });
+    // 로그인 성공 → universityId를 키로 Keychain 저장
+    credentials.keychainSet(universityId, libraryPw);
+    config.save({ selectedUniversity: universityId, libraryId, hasLibraryCredentials: true });
     res.json({ ok: true });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -286,11 +297,12 @@ app.post('/api/run', (req, res) => {
 
   const params = req.body;
   const cfg = config.load();
+  const universityId = params.universityId || cfg.selectedUniversity || 'hufs';
   const lid = params.libraryId || cfg.libraryId;
 
   if (!lid) return res.status(400).json({ error: '도서관 ID가 설정되지 않았습니다.' });
 
-  const lpw = credentials.keychainGet(lid);
+  const lpw = credentials.keychainGet(universityId);
   if (!lpw) return res.status(400).json({ error: '도서관 PW를 먼저 저장하세요.' });
 
   const anthropicKey = credentials.keychainGet('__anthropic__') || process.env.ANTHROPIC_API_KEY;
@@ -313,7 +325,7 @@ app.post('/api/run', (req, res) => {
   const resolvedOutputDir = params.outputDir || path.join(__dirname, '..', 'output');
 
   runner.run(
-    { ...params, libraryId: lid, libraryPw: lpw, anthropicKey, useClaudeCli, claudeCliPath, researchContext: params.researchContext || null },
+    { ...params, universityId, libraryId: lid, libraryPw: lpw, anthropicKey, useClaudeCli, claudeCliPath, researchContext: params.researchContext || null },
     (text) => send('log', text),
     (code) => {
       if (code === 0) {
@@ -384,6 +396,15 @@ app.post('/api/shutdown', (req, res) => {
 
 // ── 서버 시작 ─────────────────────────────────────────────
 (async () => {
+  // 기존 HUFS 사용자 마이그레이션: libraryId 키 → 'hufs' 키
+  try {
+    const cfg = config.load();
+    if (cfg.libraryId && credentials.keychainHas(cfg.libraryId) && !credentials.keychainHas('hufs')) {
+      const pw = credentials.keychainGet(cfg.libraryId);
+      if (pw) credentials.keychainSet('hufs', pw);
+    }
+  } catch {}
+
   const port = await findFreePort(47281, 47299);
   config.writePort(port);
   app.listen(port, '127.0.0.1', () => {

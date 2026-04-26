@@ -7,6 +7,7 @@ const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json');
 const PORT_FILE = path.join(CONFIG_DIR, 'port');
 
 const DEFAULTS = {
+  selectedUniversity: 'hufs',
   libraryId: '',
   lastOutputDir: path.join(os.homedir(), 'Downloads', 'RISS_출력'),
   lastKeywords: [],

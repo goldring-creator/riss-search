@@ -19,6 +19,7 @@ function buildArgs(params) {
     args.push('--exclude', params.excludeKeywords.join(','));
   if (params.skipDownload) args.push('--skip-download');
   if (params.skipClassify) args.push('--skip-classify');
+  if (params.universityId) args.push('--university-id', params.universityId);
   if (params.libraryId) args.push('--library-id', params.libraryId);
   if (params.libraryPw) args.push('--library-pw', params.libraryPw);
   if (params.outputDir) args.push('--output-dir', params.outputDir);

@@ -19,14 +19,57 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupAnalyzeButton();
 
   try {
-    const cfg = await fetch('/api/config').then(r => r.json());
+    const [cfg, universities] = await Promise.all([
+      fetch('/api/config').then(r => r.json()),
+      fetch('/api/universities').then(r => r.json()),
+    ]);
+    populateUniversitySelect(universities, cfg.selectedUniversity);
     applyConfig(cfg);
   } catch (e) {
     console.warn('설정 로드 실패:', e);
   }
 });
 
+function populateUniversitySelect(universities, selectedId) {
+  const sel = document.getElementById('university-select');
+  universities.forEach(({ id, name }) => {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = name;
+    if (id === selectedId) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  // 선택된 대학의 도서관 링크 초기 표시
+  const selected = universities.find(u => u.id === selectedId);
+  if (selected) updateLibraryLink(selected.name, selected.libraryUrl);
+}
+
+function onUniversityChange() {
+  const sel = document.getElementById('university-select');
+  const opt = sel.options[sel.selectedIndex];
+  if (!opt || !opt.value) {
+    updateLibraryLink('—', '#');
+    return;
+  }
+  // 도서관 링크 업데이트 (dataset에 libraryUrl 없으면 API 재조회 없이 표시만)
+  fetch('/api/universities').then(r => r.json()).then(universities => {
+    const u = universities.find(x => x.id === opt.value);
+    if (u) updateLibraryLink(u.name, u.libraryUrl);
+  }).catch(() => {});
+}
+
+function updateLibraryLink(name, url) {
+  const link = document.getElementById('library-link');
+  if (!link) return;
+  link.textContent = url && url !== '#' ? name + ' 바로가기' : '—';
+  link.href = url || '#';
+}
+
 function applyConfig(cfg) {
+  if (cfg.selectedUniversity) {
+    const sel = document.getElementById('university-select');
+    if (sel) sel.value = cfg.selectedUniversity;
+  }
   if (cfg.libraryId) document.getElementById('library-id').value = cfg.libraryId;
   if (cfg.lastOutputDir) document.getElementById('output-dir').value = cfg.lastOutputDir;
   if (cfg.pages) document.getElementById('pages').value = cfg.pages;
@@ -286,11 +329,16 @@ function getSort() {
 
 // ── 도서관 자격증명 검증 + 저장 ──────────────────────────
 async function saveLibraryCredentials() {
+  const universityId = document.getElementById('university-select').value;
   const libraryId = document.getElementById('library-id').value.trim();
   const libraryPw = document.getElementById('library-pw').value.trim();
   const status = document.getElementById('lib-status');
   const btn = document.getElementById('btn-verify-creds');
 
+  if (!universityId) {
+    setStatus(status, '⚠️ 소속 대학을 선택하세요', 'err');
+    return;
+  }
   if (!libraryId || !libraryPw) {
     setStatus(status, '⚠️ ID와 PW 모두 입력하세요', 'err');
     return;
@@ -303,7 +351,7 @@ async function saveLibraryCredentials() {
     const r = await fetch('/api/verify-credentials', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ libraryId, libraryPw }),
+      body: JSON.stringify({ universityId, libraryId, libraryPw }),
     });
     const data = await r.json();
     if (data.ok) {
@@ -440,6 +488,7 @@ function toggleRun() {
 
 async function startPipeline() {
   const params = {
+    universityId: document.getElementById('university-select').value || 'hufs',
     keywords: [...state.keywords],
     excludeKeywords: [...state.excludeKeywords],
     researchContext: state.researchContext || null,

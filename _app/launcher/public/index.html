@@ -34,13 +34,22 @@
       <div class="login-title">
         <h2>도서관 로그인</h2>
         <p class="login-desc">
-          <a href="https://lib.hufs.ac.kr/" target="_blank" class="link-inline">한국외국어대학교 도서관</a>
-          이용자 ID와 PW를 입력하세요.<br>
+          소속 대학을 선택하고 도서관 ID와 PW를 입력하세요.<br>
           로그인 확인 후 자동으로 저장되며 다음부터 바로 실행됩니다.
         </p>
       </div>
 
       <div class="login-fields">
+        <div class="form-group">
+          <label>소속 대학</label>
+          <select id="university-select" onchange="onUniversityChange()">
+            <option value="">대학을 선택하세요</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>도서관 홈페이지</label>
+          <a id="library-link" href="#" target="_blank" class="link-inline" style="font-size:0.85em">—</a>
+        </div>
         <div class="form-group">
           <label>도서관 ID</label>
           <input type="text" id="library-id" placeholder="학번 또는 이용자 ID" autocomplete="username">

@@ -9,6 +9,7 @@ const { runSearch } = require('./riss-search');
 const { runDownload } = require('./riss-download');
 const { runClassify } = require('./riss-classify');
 const { filterByRelevance } = require('./riss-filter');
+const { PROFILES } = require('./university-profiles');
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -19,6 +20,7 @@ function parseArgs() {
     skipDownload: false, skipClassify: false,
     yearFrom: null, yearTo: null, kciOnly: false,
     sort: 'rank',
+    universityId: 'hufs',
     libraryId: null, libraryPw: null,
     outputDir: null,
   };
@@ -34,6 +36,7 @@ function parseArgs() {
     if (args[i] === '--year-to' && args[i + 1]) opts.yearTo = args[++i];
     if (args[i] === '--kci-only') opts.kciOnly = true;
     if (args[i] === '--sort' && args[i + 1]) opts.sort = args[++i];
+    if (args[i] === '--university-id' && args[i + 1]) opts.universityId = args[++i];
     if (args[i] === '--library-id' && args[i + 1]) opts.libraryId = args[++i];
     if (args[i] === '--library-pw' && args[i + 1]) opts.libraryPw = args[++i];
     if (args[i] === '--output-dir' && args[i + 1]) opts.outputDir = args[++i];
@@ -111,7 +114,15 @@ async function main() {
   });
 
   try {
+    const universityId = opts.universityId || process.env.RISS_UNIVERSITY || 'hufs';
+    const profile = PROFILES[universityId];
+    if (!profile) {
+      console.error(`지원하지 않는 대학 ID: ${universityId}`);
+      process.exit(1);
+    }
     const creds = {
+      universityId,
+      profile,
       libraryId: opts.libraryId || process.env.RISS_ID,
       libraryPw: opts.libraryPw || process.env.RISS_PW,
     };
