@@ -26,20 +26,24 @@ async function loginAndGetRiss(context, creds = {}) {
   const rissLink = await page.$('a[href*="riss"]');
   if (!rissLink) throw new Error('RISS 링크를 찾을 수 없습니다');
 
-  const [rissPage] = await Promise.all([
-    context.waitForEvent('page'),
-    rissLink.click()
-  ]);
-  await rissPage.waitForTimeout(5000);
+  const rissHref = await rissLink.getAttribute('href');
+  const absoluteHref = rissHref.startsWith('http') ? rissHref : `https://lib.hufs.ac.kr${rissHref}`;
+
+  // 새 탭 대신 현재 탭에서 직접 이동 — EZproxy 리다이렉트 체인을 안정적으로 따라감
+  await page.goto(absoluteHref, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+  // 리다이렉트 체인이 완전히 끝날 때까지 대기 (networkidle = 모든 요청 완료)
   try {
-    await rissPage.waitForLoadState('domcontentloaded', { timeout: 60000 });
-  } catch { /* 타임아웃 무시 */ }
+    await page.waitForLoadState('networkidle', { timeout: 60000 });
+  } catch { /* 타임아웃 무시, URL만 확인 */ }
 
-  if (!rissPage.url().includes('riss.kr')) throw new Error('RISS 접속 실패');
-  console.log('RISS 접속 성공:', rissPage.url());
+  const finalUrl = page.url();
+  // riss.kr 직접 접속 또는 EZproxy 경유 (sproxy.hufs.ac.kr/_Lib_Proxy_Url/...riss.kr...) 모두 허용
+  const isRiss = finalUrl.includes('riss.kr') || finalUrl.includes('sproxy.hufs.ac.kr');
+  if (!isRiss) throw new Error(`RISS 접속 실패 — 최종 URL: ${finalUrl}`);
+  console.log('RISS 접속 성공:', finalUrl);
 
-  await page.close();
-  return rissPage;
+  return page;
 }
 
 module.exports = { loginAndGetRiss };

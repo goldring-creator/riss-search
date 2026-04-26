@@ -1,6 +1,9 @@
 #!/bin/bash
 # RISS 논문 수집기 — 더블클릭으로 실행
 
+# AppleScript do shell script는 PATH가 제한적이므로 Node.js 경로를 명시적으로 추가
+export PATH="/usr/local/bin:/opt/homebrew/bin:$PATH"
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$SCRIPT_DIR/_app"
 CONFIG_DIR="$HOME/.riss"
