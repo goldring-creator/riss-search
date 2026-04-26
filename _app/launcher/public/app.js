@@ -91,8 +91,9 @@ function applyConfig(cfg) {
   const canClassify = cfg.hasAnthropicKey || cfg.hasClaudeCli;
   document.getElementById('skip-classify').checked = !canClassify;
 
-  // 로그인 여부에 따라 화면 전환
-  showScreen(cfg.hasLibraryCredentials ? 'main' : 'login');
+  // 로그인 여부에 따라 화면 전환 (?login 쿼리 파라미터로 강제 로그인 화면)
+  const forceLogin = new URLSearchParams(location.search).has('login');
+  showScreen(!forceLogin && cfg.hasLibraryCredentials ? 'main' : 'login');
 
   updateRunButton();
 }
@@ -101,6 +102,7 @@ function applyConfig(cfg) {
 function showScreen(name) {
   document.getElementById('screen-login').classList.toggle('hidden', name !== 'login');
   document.getElementById('screen-main').classList.toggle('hidden', name !== 'main');
+  document.getElementById('btn-change-univ').classList.toggle('hidden', name !== 'main');
 }
 
 // ── 카드 토글 ─────────────────────────────────────────────

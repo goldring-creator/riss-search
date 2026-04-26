@@ -20,6 +20,8 @@
         <p class="header-sub">학술연구정보서비스 자동 수집 도구</p>
       </div>
     </div>
+    <button class="btn-change-univ hidden" id="btn-change-univ" onclick="showScreen('login')">대학 변경</button>
+    <a href="guide.html" target="_blank" class="btn-change-univ">사용 가이드</a>
     <div class="thesis-notice">학위논문 미포함</div>
   </div>
 </header>
@@ -238,8 +240,8 @@
         </div>
         <p class="api-key-desc">
           API 키가 없으면 Claude CLI가 자동으로 사용됩니다.
-          <a href="https://goldring-creator.github.io/claude_guide_for_edu-reserch/guide/intro-03-installation.html" target="_blank" class="link-inline">Claude CLI 설치 방법</a> ·
-          <a href="https://console.anthropic.com/" target="_blank" class="link-inline">API 키 발급</a>
+          <a href="guide.html#cli" target="_blank" class="link-inline">Claude CLI 설치 방법</a> ·
+          <a href="guide.html#api" target="_blank" class="link-inline">API 키 발급</a>
         </p>
         <div class="action-row" style="gap:8px">
           <input type="password" id="anthropic-key" placeholder="sk-ant-..." autocomplete="off" style="flex:1">

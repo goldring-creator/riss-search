@@ -87,6 +87,23 @@ body {
   font-weight: 300;
   letter-spacing: .4px;
 }
+.btn-change-univ {
+  background: none;
+  border: 1px solid var(--border-mid);
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-size: 11px;
+  color: var(--text-sec);
+  cursor: pointer;
+  white-space: nowrap;
+  letter-spacing: .3px;
+  font-family: inherit;
+  transition: border-color var(--ease), color var(--ease);
+}
+.btn-change-univ:hover {
+  border-color: var(--accent-border);
+  color: var(--accent);
+}
 .thesis-notice {
   background: var(--accent-dim);
   border: 1px solid var(--accent-border);
