@@ -19,9 +19,9 @@ function buildArgs(params) {
     args.push('--exclude', params.excludeKeywords.join(','));
   if (params.skipDownload) args.push('--skip-download');
   if (params.skipClassify) args.push('--skip-classify');
+  if (params.headed) args.push('--headed');
   if (params.universityId) args.push('--university-id', params.universityId);
-  if (params.libraryId) args.push('--library-id', params.libraryId);
-  if (params.libraryPw) args.push('--library-pw', params.libraryPw);
+  // libraryId/libraryPw는 ps 노출 방지를 위해 CLI 인자가 아닌 env로 전달 (run 참조)
   if (params.outputDir) args.push('--output-dir', params.outputDir);
   return args;
 }
@@ -34,6 +34,9 @@ function run(params, onData, onEnd) {
 
   const args = buildArgs(params);
   const env = { ...process.env };
+  if (params.libraryId) env.RISS_ID = params.libraryId;
+  if (params.libraryPw) env.RISS_PW = params.libraryPw;
+  if (params.universityId) env.RISS_UNIVERSITY = params.universityId;
   if (params.anthropicKey) env.ANTHROPIC_API_KEY = params.anthropicKey;
   if (params.useClaudeCli) env.USE_CLAUDE_CLI = '1';
   if (params.claudeCliPath) env.CLAUDE_CLI_PATH = params.claudeCliPath;

@@ -2,10 +2,13 @@
 const { PROFILES } = require('./university-profiles');
 
 // 여러 셀렉터 후보를 순서대로 시도
+// 후보당 3초 제한 — 기본값(30초)이면 추정 셀렉터 대학에서 로그인이 수 분 지연됨
+const SELECTOR_TIMEOUT = 3000;
+
 async function tryFill(page, selectors, value) {
   for (const sel of selectors) {
     try {
-      await page.fill(sel, value);
+      await page.fill(sel, value, { timeout: SELECTOR_TIMEOUT });
       return;
     } catch {}
   }
@@ -15,7 +18,7 @@ async function tryFill(page, selectors, value) {
 async function tryClick(page, selectors) {
   for (const sel of selectors) {
     try {
-      await page.locator(sel).first().click();
+      await page.locator(sel).first().click({ timeout: SELECTOR_TIMEOUT });
       return;
     } catch {}
   }
@@ -41,14 +44,24 @@ async function loginAndGetRiss(context, creds = {}) {
   await tryFill(page, profile.idSelectors, libraryId);
   await tryFill(page, profile.pwSelectors, libraryPw);
   await tryClick(page, profile.submitSelectors);
-  await page.waitForTimeout(5000);
 
+  // waitForURL의 predicate는 URL 객체를 받으므로 문자열로 변환해 전달
+  // (기존 코드는 문자열 함수를 그대로 넘겨 항상 예외 → 고정 5초 대기에만 의존했음)
   try {
-    await page.waitForURL(profile.loginSuccessCheck, { timeout: 60000 });
-  } catch { /* 계속 진행 */ }
+    await page.waitForURL(u => profile.loginSuccessCheck(u.toString()), { timeout: 30000 });
+  } catch { /* 아래에서 최종 판정 */ }
+  await page.waitForTimeout(1500);
 
   if (!profile.loginSuccessCheck(page.url())) {
-    throw new Error(`도서관 로그인 실패 — ID/PW를 확인하세요. (${profile.name})`);
+    // 로그인 페이지에 머물러 있으면 자격증명 문제일 가능성이 높음
+    const alertText = await page.evaluate(() =>
+      document.body?.innerText?.match(/(?:비밀번호|아이디|인증|일치하지|실패)[^\n]{0,60}/)?.[0] || ''
+    ).catch(() => '');
+    throw new Error(
+      `도서관 로그인 실패 (${profile.name}) — ID/PW를 확인하세요.` +
+      (alertText ? ` [페이지 메시지: ${alertText.trim()}]` : '') +
+      ` [현재 URL: ${page.url()}]`
+    );
   }
   console.log('도서관 로그인 성공');
 
@@ -61,16 +74,28 @@ async function loginAndGetRiss(context, creds = {}) {
     : `${profile.libraryPrefix}${rissHref}`;
 
   // 현재 탭에서 직접 이동 — EZproxy 리다이렉트 체인을 안정적으로 따라감
-  await page.goto(absoluteHref, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  // 프록시 첫 접속이 간헐적으로 chrome-error로 떨어지므로 최대 3회 재시도
+  let finalUrl = '';
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      await page.goto(absoluteHref, { waitUntil: 'domcontentloaded', timeout: 30000 });
+    } catch { /* 네비게이션 오류 — 아래에서 URL로 판정 */ }
 
-  // 리다이렉트 체인이 완전히 끝날 때까지 대기
-  try {
-    await page.waitForLoadState('networkidle', { timeout: 60000 });
-  } catch { /* 타임아웃 무시, URL만 확인 */ }
+    // 리다이렉트 체인이 완전히 끝날 때까지 대기
+    try {
+      await page.waitForLoadState('networkidle', { timeout: 30000 });
+    } catch { /* 타임아웃 무시, URL만 확인 */ }
 
-  const finalUrl = page.url();
+    finalUrl = page.url();
+    if (profile.rissCheck(finalUrl)) break;
+    if (attempt < 3) {
+      console.log(`RISS 접속 재시도 (${attempt}/3) — 현재 URL: ${finalUrl}`);
+      await page.waitForTimeout(3000);
+    }
+  }
+
   if (!profile.rissCheck(finalUrl)) {
-    throw new Error(`RISS 접속 실패 — 최종 URL: ${finalUrl}`);
+    throw new Error(`RISS 접속 실패 (3회 시도) — 최종 URL: ${finalUrl}`);
   }
   console.log('RISS 접속 성공:', finalUrl);
 

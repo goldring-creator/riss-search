@@ -13,6 +13,11 @@ const { PROFILES } = require('../core/university-profiles');
 
 function findClaudeCli() {
   try {
+    if (process.platform === 'win32') {
+      const p = execSync('where claude', { encoding: 'utf8' })
+        .split(/\r?\n/)[0].trim();
+      return p || null;
+    }
     const p = execSync(
       'export PATH=/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:$PATH; which claude 2>/dev/null',
       { shell: '/bin/bash', encoding: 'utf8' }
@@ -94,9 +99,10 @@ app.post('/api/verify-credentials', async (req, res) => {
   try {
     const { chromium } = require('playwright');
     const { loginAndGetRiss } = require('../core/riss-auth');
+    const { launchOptions, contextOptions } = require('../core/browser-config');
 
-    browser = await chromium.launch({ headless: true });
-    const context = await browser.newContext();
+    browser = await chromium.launch(launchOptions());
+    const context = await browser.newContext(contextOptions());
     const rissPage = await loginAndGetRiss(context, { universityId, profile, libraryId, libraryPw });
     await rissPage.close();
     await context.close();
@@ -119,13 +125,15 @@ app.post('/api/pick-folder', (req, res) => {
     if (process.platform === 'win32') {
       const tmp = require('path').join(require('os').tmpdir(), 'riss_folder.ps1');
       require('fs').writeFileSync(tmp, `
-Add-Type -AssemblyName System.Windows.Forms
+[System.Reflection.Assembly]::LoadWithPartialName('System.Windows.Forms') | Out-Null
 $d = New-Object System.Windows.Forms.FolderBrowserDialog
+$d.RootFolder = [System.Environment+SpecialFolder]::Desktop
 $d.Description = '저장 위치를 선택하세요'
 $d.ShowNewFolderButton = $true
-if ($d.ShowDialog() -eq 'OK') { $d.SelectedPath }
+$result = $d.ShowDialog()
+if ($result -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output $d.SelectedPath }
 `, 'utf8');
-      result = execSync(`powershell -ExecutionPolicy Bypass -File "${tmp}"`, { timeout: 30000 }).toString().trim();
+      result = execSync(`powershell -NoProfile -STA -ExecutionPolicy Bypass -File "${tmp}"`, { timeout: 30000 }).toString().trim();
       try { require('fs').unlinkSync(tmp); } catch {}
       if (!result) return res.json({ cancelled: true });
     } else {
@@ -152,13 +160,10 @@ app.post('/api/extract-keywords', upload.single('file'), async (req, res) => {
     let text = '';
 
     if (ext === '.pdf') {
-      const { PDFParse } = require('pdf-parse');
+      const pdfParse = require('pdf-parse');
       const buf = fs.readFileSync(tmpPath);
-      const parser = new PDFParse({ data: buf });
-      await parser.load(buf);
-      const data = await parser.getText();
+      const data = await pdfParse(buf);
       text = data.text;
-      await parser.destroy().catch(() => {});
     } else if (ext === '.docx') {
       const mammoth = require('mammoth');
       const result = await mammoth.extractRawText({ path: tmpPath });
@@ -209,10 +214,17 @@ JSON만 출력하세요:
     } else {
       const claudeCliPath = findClaudeCli();
       if (!claudeCliPath) return res.status(400).json({ error: 'Claude API 키 또는 Claude CLI가 필요합니다.' });
-      const r = spawnSync(claudeCliPath, ['-p', extractPrompt], {
-        encoding: 'utf8', timeout: 60000,
-        env: { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}` },
-      });
+      const isWin1 = process.platform === 'win32';
+      const r = spawnSync(
+        isWin1 ? 'cmd' : claudeCliPath,
+        isWin1 ? ['/c', claudeCliPath, '-p', extractPrompt] : ['-p', extractPrompt],
+        {
+          encoding: 'utf8', timeout: 60000,
+          env: isWin1
+            ? { ...process.env }
+            : { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}` },
+        }
+      );
       if (r.error) return res.status(500).json({ error: `Claude CLI 오류: ${r.error.message}` });
       try {
         const json = JSON.parse(r.stdout.match(/\{[\s\S]+\}/)[0]);
@@ -271,10 +283,17 @@ JSON만 출력: {"keywords":["..."]}`;
     } else {
       const claudeCliPath = findClaudeCli();
       if (!claudeCliPath) return res.status(400).json({ error: 'Claude API 키 또는 Claude CLI가 필요합니다.' });
-      const r = spawnSync(claudeCliPath, ['-p', prompt], {
-        encoding: 'utf8', timeout: 60000,
-        env: { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}` },
-      });
+      const isWin2 = process.platform === 'win32';
+      const r = spawnSync(
+        isWin2 ? 'cmd' : claudeCliPath,
+        isWin2 ? ['/c', claudeCliPath, '-p', prompt] : ['-p', prompt],
+        {
+          encoding: 'utf8', timeout: 60000,
+          env: isWin2
+            ? { ...process.env }
+            : { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}` },
+        }
+      );
       if (r.error) return res.status(500).json({ error: `Claude CLI 오류: ${r.error.message}` });
       try {
         const json = JSON.parse(r.stdout.match(/\{[\s\S]+\}/)[0]);
@@ -338,6 +357,7 @@ app.post('/api/run', (req, res) => {
           }
         } catch {}
         try {
+          // PDF는 downloaded/ 또는 분류 후 카테고리 폴더에 저장되므로 출력 폴더 전체에서 재귀 카운트
           const countPdfs = (dir) => {
             if (!fs.existsSync(dir)) return 0;
             return fs.readdirSync(dir).reduce((acc, f) => {
@@ -345,7 +365,7 @@ app.post('/api/run', (req, res) => {
               return acc + (fs.statSync(fp).isDirectory() ? countPdfs(fp) : f.endsWith('.pdf') ? 1 : 0);
             }, 0);
           };
-          pdfCount = countPdfs(path.join(resolvedOutputDir, 'pdfs'));
+          pdfCount = countPdfs(resolvedOutputDir);
         } catch {}
 
         send('summary', { outputDir: resolvedOutputDir, total, pdfCount });

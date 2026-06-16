@@ -1,0 +1,64 @@
+RISS 논문수집기 v2.1
+====================
+
+RISS 기반 국내 학술논문 자동 수집 도구
+(검색 → AI 관련도 필터 → PDF 다운로드 → 주제별 자동 분류)
+
+■ 실행 방법
+
+[Mac]
+  1. RISS 논문수집.app 을 우클릭 → "열기" 선택
+     (첫 실행 시 1회만 — 이후엔 더블클릭으로 실행)
+  2. 최초 실행 시 Node.js · 브라우저 · Claude CLI 자동 설치
+     (인터넷 연결 필요 / 약 3-5분 소요)
+  3. 브라우저가 자동으로 열립니다
+
+[Windows]
+  1. RISS-search.bat 더블클릭
+  2. "Windows가 PC를 보호했습니다" 창이 뜨면
+     → "추가 정보" 클릭 → "실행" 클릭
+  3. 최초 실행 시 Node.js · 브라우저 · Claude CLI 자동 설치
+  4. 브라우저가 자동으로 열립니다
+
+■ 첫 실행 설정 (앱 화면에서)
+
+1. 대학교 선택 — 한국외대, 고려대, 충남대, 서울대, 성균관대,
+   경희대, 부산대, 건국대, 국민대, 충북대 지원
+2. 도서관 ID(학번)·비밀번호 입력
+   → OS 보안 저장소(Mac Keychain / Windows DPAPI)에만 저장됩니다.
+     파일로 저장되지 않으며 이 폴더 어디에도 남지 않습니다.
+3. Claude API 키 입력 (선택 — AI 분류 기능용)
+   키 없이도 기본 수집 기능 사용 가능 (Claude CLI 설치 시 키 불필요)
+
+■ 터미널(CLI)로 직접 쓰려면
+
+_app/.env.example 을 복사해 .env 로 만들고 본인 정보 입력 후:
+  cd _app
+  node core/riss-main.js --keyword "검색어" --pages 2 --output-dir ~/Downloads/RISS_출력
+
+■ Claude Code 사용자라면 (MCP)
+
+터미널에서 한 줄로 등록하면 Claude에게 말로 시킬 수 있습니다:
+  claude mcp add riss -- node "<이 폴더 경로>/_app/mcp/server.js"
+
+자격증명은 ~/.riss/.env 파일에 저장:
+  RISS_ID=학번
+  RISS_PW=비밀번호
+  RISS_UNIVERSITY=hufs
+
+등록 후 Claude Code에서: "RISS에서 OO 키워드 논문 수집해줘"
+(도구: riss_verify_login / riss_search / riss_download / riss_status)
+
+■ 알아두기
+
+- KISS·DBpia 등 일부 제공사는 페이지 로드가 느립니다(15초 이상).
+  멈춘 게 아니라 자동 대기 중이니 기다려 주세요.
+- DRM 보호 논문(일부 학위논문)은 자동 다운로드가 불가합니다.
+- 접속 오류가 간헐적으로 나면 자동으로 3회까지 재시도합니다.
+
+■ 로그 위치 (문제 발생 시)
+
+[Mac]    /tmp/riss-launcher.log
+[Windows] %USERPROFILE%\.riss\server.log
+
+■ 문의: goldringedu@gmail.com

@@ -14,7 +14,8 @@ function buildPrompt(papers, keywords, researchContext) {
 
   return `${contextLine}
 
-아래 논문 목록에서 위 연구의 선행연구·이론적 배경으로 활용 가능한 논문의 번호만 쉼표로 나열하세요.
+아래 논문 목록에서 검색 키워드 또는 연구 맥락과 관련된 논문의 번호만 쉼표로 나열하세요.
+주의: 논문 제목에 키워드가 없더라도 초록에서 관련성이 확인되면 포함하세요.
 관련 없는 논문은 제외하세요. 숫자와 쉼표만 출력하세요.
 
 ${list}`;
@@ -43,14 +44,18 @@ async function assessBatch(papers, keywords, opts) {
     });
     responseText = msg.content[0].text;
   } else if (opts.useClaudeCli && opts.claudeCliPath) {
-    const r = spawnSync(opts.claudeCliPath, ['-p', prompt], {
-      encoding: 'utf8',
-      timeout: 120000,
-      env: {
-        ...process.env,
-        PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}`,
-      },
-    });
+    const isWin = process.platform === 'win32';
+    const r = spawnSync(
+      isWin ? 'cmd' : opts.claudeCliPath,
+      isWin ? ['/c', opts.claudeCliPath, '-p', prompt] : ['-p', prompt],
+      {
+        encoding: 'utf8',
+        timeout: 120000,
+        env: isWin
+          ? { ...process.env }
+          : { ...process.env, PATH: `/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:${process.env.PATH}` },
+      }
+    );
     if (r.error) throw new Error(`Claude CLI 오류: ${r.error.message}`);
     responseText = r.stdout || '';
   } else {

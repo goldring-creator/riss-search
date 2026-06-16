@@ -6,6 +6,7 @@ const state = {
   hasLibraryCreds: false,
   hasAnthropicKey: false,
   hasClaudeCli: false,
+  hasClaudeAuth: false,
   lastOutputDir: null,
   researchContext: '',
 };
@@ -85,10 +86,11 @@ function applyConfig(cfg) {
   state.hasLibraryCreds = cfg.hasLibraryCredentials;
   state.hasAnthropicKey = cfg.hasAnthropicKey;
   state.hasClaudeCli = cfg.hasClaudeCli;
+  state.hasClaudeAuth = cfg.hasClaudeAuth;
   updateClaudeStatus();
 
-  // 분류 기능: API 키나 Claude CLI 있으면 기본 활성화
-  const canClassify = cfg.hasAnthropicKey || cfg.hasClaudeCli;
+  // 분류 기능: Claude 로그인·CLI·API 키 중 하나 있으면 기본 활성화
+  const canClassify = cfg.hasClaudeAuth || cfg.hasAnthropicKey || cfg.hasClaudeCli;
   document.getElementById('skip-classify').checked = !canClassify;
 
   // 로그인 여부에 따라 화면 전환 (?login 쿼리 파라미터로 강제 로그인 화면)
@@ -404,7 +406,10 @@ function setStatus(el, msg, cls) {
 function updateClaudeStatus() {
   const el = document.getElementById('claude-cli-status');
   if (!el) return;
-  if (state.hasAnthropicKey) {
+  if (state.hasClaudeAuth) {
+    el.textContent = 'Claude 로그인 사용 중';
+    el.className = 'status-badge ok';
+  } else if (state.hasAnthropicKey) {
     el.textContent = 'API 키 사용';
     el.className = 'status-badge ok';
   } else if (state.hasClaudeCli) {
@@ -464,10 +469,10 @@ function updateRunButton() {
     if (kwCount) kwCount.textContent = state.keywords.length;
   }
 
-  btn.disabled = !hasInput || !hasCreds || state.isRunning;
+  btn.disabled = !hasKw || !hasCreds || state.isRunning;
 
-  if (!hasInput && !hasCreds) info.textContent = '연구 설정(파일·맥락·키워드 중 하나)과 도서관 ID를 설정하면 활성화됩니다.';
-  else if (!hasInput) info.textContent = '파일 업로드, 연구 맥락, 또는 검색 키워드 중 하나를 입력하세요.';
+  if (!hasKw && !hasCreds) info.textContent = '검색 키워드와 도서관 ID를 설정하면 활성화됩니다.';
+  else if (!hasKw) info.textContent = '키워드를 직접 입력하거나, 파일·맥락 분석으로 자동 생성하세요.';
   else if (!hasCreds) info.textContent = '도서관 ID를 저장해 주세요.';
   else if (state.isRunning) info.textContent = '실행 중...';
   else {

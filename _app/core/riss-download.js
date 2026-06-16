@@ -95,24 +95,86 @@ async function downloadFromEarticle(extPage, paper, pdfsDir) {
 }
 
 async function downloadFromKiss(extPage, paper, pdfsDir) {
-  // KISS (kiss.kstudy.com) — 테스트 확인: text "다운로드"
+  // KISS (kiss.kstudy.com / kiss-kstudy-com.sproxy.*)
+  // 프록시(sproxy) 경유 시 응답이 매우 느리게 스트리밍되어 body가 15초+ 후에 도착함
+  // → body 콘텐츠가 실제로 나타날 때까지 폴링 (최대 60초)
   await extPage.waitForLoadState('domcontentloaded', { timeout: 15000 }).catch(() => {});
-  await extPage.waitForTimeout(2000);
+  const bodyReady = await extPage.waitForFunction(
+    () => document.body && document.body.innerText.length > 100,
+    null,
+    { timeout: 60000, polling: 1000 }
+  ).then(() => true).catch(() => false);
+  if (!bodyReady) {
+    console.log('    (KISS 페이지 본문이 60초 내 로드되지 않음)');
+    return null;
+  }
+  await extPage.waitForTimeout(1500);
 
-  const [download] = await Promise.all([
-    extPage.waitForEvent('download', { timeout: 20000 }),
-    extPage.evaluate(() => {
-      const btn = Array.from(document.querySelectorAll('a, button')).find(el =>
-          el.textContent?.trim().match(/다운로드|Download/))
-        || document.querySelector('#btnDownload, a[onclick*="download"], .down_btn');
-      if (btn) btn.click();
-    })
-  ]);
+  // KISS 버튼 셀렉터 우선순위 목록
+  const KISS_SELECTORS = [
+    '#btnDown',
+    '#btnDownload',
+    'a.btn_down',
+    'button.btn_down',
+    'a[onclick*="PdfDown"]',
+    'a[onclick*="pdfDown"]',
+    'a[onclick*="fileDown"]',
+    'a[onclick*="download"]',
+    'button[onclick*="download"]',
+    '.down_btn',
+    'a[href*=".pdf"]',
+  ];
 
-  const filename = sanitizeFilename(paper.filename);
-  const savePath = path.join(pdfsDir, filename);
-  await download.saveAs(savePath);
-  return savePath;
+  // 텍스트 기반 버튼 탐색 포함 + 위 셀렉터 합산
+  const btn = await extPage.evaluate((selectors) => {
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el) return sel;
+    }
+    // 텍스트 매칭
+    const textMatch = Array.from(document.querySelectorAll('a, button')).find(el =>
+      el.textContent?.trim().match(/PDF\s*다운|원문\s*다운|다운로드|Download/i)
+    );
+    if (textMatch) {
+      const id = textMatch.id || textMatch.className.split(' ')[0];
+      return id ? `#${textMatch.id || ''}` : '__text__';
+    }
+    return null;
+  }, KISS_SELECTORS);
+
+  if (!btn) {
+    // 페이지 내용 디버그용 스냅샷
+    const bodyText = await extPage.evaluate(() =>
+      document.body?.innerText?.substring(0, 300) || ''
+    ).catch(() => '');
+    console.log(`    (KISS 버튼 미발견, 페이지: ${bodyText.replace(/\n/g, ' ').substring(0, 100)})`);
+    return null;
+  }
+
+  try {
+    const [download] = await Promise.all([
+      extPage.waitForEvent('download', { timeout: 25000 }),
+      extPage.evaluate((sel) => {
+        let el;
+        if (sel === '__text__') {
+          el = Array.from(document.querySelectorAll('a, button')).find(e =>
+            e.textContent?.trim().match(/PDF\s*다운|원문\s*다운|다운로드|Download/i)
+          );
+        } else {
+          el = document.querySelector(sel);
+        }
+        if (el) el.click();
+      }, btn)
+    ]);
+    const filename = sanitizeFilename(paper.filename);
+    const savePath = path.join(pdfsDir, filename);
+    await download.saveAs(savePath);
+    return savePath;
+  } catch (err) {
+    // 팝업 페이지에서 다운로드 트리거될 수 있음 — Generic 핸들러로 재시도
+    console.log(`    (KISS 직접 클릭 실패, Generic 시도: ${err.message})`);
+    return await downloadFromGeneric(extPage, paper, pdfsDir);
+  }
 }
 
 async function downloadFromRissDirect(extPage, paper, pdfsDir) {
@@ -193,6 +255,27 @@ async function downloadFromGeneric(extPage, paper, pdfsDir) {
 // 메인 다운로드 로직
 // ──────────────────────────────────────────────
 
+// 외부 페이지 안정화 대기
+// 1) UrlLoad.do → 제공사 리다이렉트 체인이 끝날 때까지 URL 변화 폴링
+//    (중간 URL로 제공사를 오판하면 잘못된 핸들러로 분기됨)
+// 2) sproxy 프록시 경유 시 body가 15초+ 후에야 스트리밍되므로 본문 도착까지 대기
+async function settleExternalPage(extPage) {
+  await extPage.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
+  let prev = '';
+  for (let i = 0; i < 20; i++) {
+    await extPage.waitForTimeout(1000);
+    const cur = extPage.url();
+    if (cur === prev && !cur.includes('UrlLoad')) break;
+    prev = cur;
+  }
+  await extPage.waitForFunction(
+    () => document.body && document.body.innerText.length > 100,
+    null,
+    { timeout: 45000, polling: 1000 }
+  ).catch(() => {});
+}
+
+// 반환: { status: 'success'|'no_link'|'drm'|'failed', path: string|null }
 async function attemptDownload(context, rissPage, paper, pdfsDir) {
   // 상세 페이지로 이동
   await rissPage.goto(paper.detailUrl);
@@ -210,39 +293,54 @@ async function attemptDownload(context, rissPage, paper, pdfsDir) {
   // memberUrlDownload 없고 fulltextDownload만 있을 때 → 학위논문 DRM
   if (!memberBtn && fulltextBtn) {
     console.log('    (DRM 보호 — 자동 다운로드 불가)');
-    return null;
+    return { status: 'drm', path: null };
   }
 
-  if (!memberBtn) return null;
+  if (!memberBtn) return { status: 'no_link', path: null };
 
   // evaluate()로 클릭해야 onclick 핸들러가 정상 실행됨
-  // Promise.all 순서: 이벤트 리스너 먼저 등록 후 클릭
-  const extPagePromise = context.waitForEvent('page', { timeout: 20000 });
+  // 이벤트 리스너 먼저 등록 후 클릭. 새 탭이 안 뜨면 같은 탭 이동 여부 확인(폴백)
+  const extPagePromise = context.waitForEvent('page', { timeout: 15000 }).catch(() => null);
   await rissPage.evaluate(() => {
     document.querySelector('a[onclick*="memberUrlDownload"]')?.click();
   });
-  const extPage = await extPagePromise;
+  let extPage = await extPagePromise;
+  let usedSameTab = false;
 
-  // UrlLoad.do → 외부 사이트 리다이렉트 완료 대기
-  await extPage.waitForLoadState('domcontentloaded', { timeout: 30000 }).catch(() => {});
-  await extPage.waitForTimeout(3000);
+  if (!extPage) {
+    // 새 탭 미발생 — 같은 탭에서 외부 사이트로 이동한 경우 폴백
+    await rissPage.waitForTimeout(2000);
+    if (!rissPage.url().includes('DetailView')) {
+      extPage = rissPage;
+      usedSameTab = true;
+      console.log('    (같은 탭 이동 감지 — 폴백 사용)');
+    } else {
+      console.log('    ✗ 다운로드 창이 열리지 않음');
+      return { status: 'failed', path: null };
+    }
+  }
+
+  // UrlLoad.do → 외부 사이트 리다이렉트 + 본문 로드 완료 대기
+  await settleExternalPage(extPage);
 
   const extUrl = extPage.url();
   console.log(`    → ${extUrl.split('/').slice(0, 3).join('/')}`);
 
   let downloadPath = null;
   try {
-    if (extUrl.includes('scholar.kyobobook.co.kr')) {
+    // HUFS 프록시 URL 패턴: 도메인 점(.)이 하이픈(-)으로 치환됨
+    // 예) kiss.kstudy.com → kiss-kstudy-com.sproxy.hufs.ac.kr
+    if (extUrl.includes('scholar.kyobobook') || extUrl.includes('scholar-kyobobook')) {
       downloadPath = await downloadFromScholar(extPage, paper, pdfsDir);
-    } else if (extUrl.includes('kci.go.kr')) {
+    } else if (extUrl.includes('kci.go.kr') || extUrl.includes('kci-go-kr')) {
       downloadPath = await downloadFromKci(extPage, paper, pdfsDir);
-    } else if (extUrl.includes('dbpia.co.kr')) {
+    } else if (extUrl.includes('dbpia.co.kr') || extUrl.includes('dbpia-co-kr')) {
       downloadPath = await downloadFromDbpia(extPage, paper, pdfsDir);
-    } else if (extUrl.includes('earticle.net')) {
+    } else if (extUrl.includes('earticle.net') || extUrl.includes('earticle-net')) {
       downloadPath = await downloadFromEarticle(extPage, paper, pdfsDir);
-    } else if (extUrl.includes('kiss.kstudy.com') || extUrl.includes('kiss.k')) {
+    } else if (extUrl.includes('kiss.kstudy') || extUrl.includes('kiss-kstudy')) {
       downloadPath = await downloadFromKiss(extPage, paper, pdfsDir);
-    } else if (extUrl.includes('riss.kr')) {
+    } else if (extUrl.includes('riss.kr') || extUrl.includes('riss-kr')) {
       downloadPath = await downloadFromRissDirect(extPage, paper, pdfsDir);
     } else {
       downloadPath = await downloadFromGeneric(extPage, paper, pdfsDir);
@@ -251,8 +349,10 @@ async function attemptDownload(context, rissPage, paper, pdfsDir) {
     console.log(`    ✗ 다운로드 실패 (${extUrl.split('/')[2]}): ${err.message}`);
   }
 
-  await extPage.close().catch(() => {});
-  return downloadPath;
+  if (!usedSameTab) await extPage.close().catch(() => {});
+  return downloadPath
+    ? { status: 'success', path: downloadPath }
+    : { status: 'failed', path: null };
 }
 
 async function downloadPapers(context, rissPage, papers, pdfsDir) {
@@ -282,15 +382,13 @@ async function downloadPapers(context, rissPage, papers, pdfsDir) {
     }
 
     try {
-      const filepath = await attemptDownload(context, rissPage, paper, pdfsDir);
-      if (filepath) {
+      const { status, path: filepath } = await attemptDownload(context, rissPage, paper, pdfsDir);
+      if (status === 'success') {
         console.log(`    ✓ 저장: ${path.basename(filepath)}`);
-        results.push({ ...paper, filePath: path.join('pdfs', path.basename(filepath)), downloadStatus: 'success' });
-      } else if (filepath === null) {
-        results.push({ ...paper, downloadStatus: 'no_link' });
+        results.push({ ...paper, filePath: path.join('downloaded', path.basename(filepath)), downloadStatus: 'success' });
       } else {
-        console.log('    ✗ 다운로드 실패');
-        results.push({ ...paper, downloadStatus: 'failed' });
+        // no_link(원문 미제공) / drm(보호) / failed(시도했으나 실패) 구분 기록
+        results.push({ ...paper, downloadStatus: status });
       }
     } catch (err) {
       console.error(`    ✗ 오류: ${err.message}`);
@@ -303,8 +401,9 @@ async function downloadPapers(context, rissPage, papers, pdfsDir) {
 
   const success = results.filter(r => r.downloadStatus === 'success').length;
   const noLink = results.filter(r => r.downloadStatus === 'no_link').length;
-  const failed = results.filter(r => r.downloadStatus !== 'success' && r.downloadStatus !== 'no_link').length;
-  console.log(`\n다운로드 완료: 성공 ${success} / 원문없음 ${noLink} / 실패 ${failed}`);
+  const drm = results.filter(r => r.downloadStatus === 'drm').length;
+  const failed = results.length - success - noLink - drm;
+  console.log(`\n다운로드 완료: 성공 ${success} / 원문없음 ${noLink} / DRM보호 ${drm} / 실패 ${failed}`);
   return results;
 }
 
